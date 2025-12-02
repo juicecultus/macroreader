@@ -16,7 +16,8 @@ GreedyLayoutStrategy::GreedyLayoutStrategy() {}
 
 GreedyLayoutStrategy::~GreedyLayoutStrategy() {}
 
-int GreedyLayoutStrategy::layoutText(WordProvider& provider, TextRenderer& renderer, const LayoutConfig& config) {
+int GreedyLayoutStrategy::layoutText(WordProvider& provider, TextRenderer& renderer, const LayoutConfig& config,
+                                     bool disableRendering) {
   const int16_t maxWidth = config.pageWidth - config.marginLeft - config.marginRight;
   const int16_t x = config.marginLeft;
   int16_t y = config.marginTop;
@@ -26,16 +27,19 @@ int GreedyLayoutStrategy::layoutText(WordProvider& provider, TextRenderer& rende
   // Measure space width using renderer
   renderer.getTextBounds(" ", 0, 0, nullptr, nullptr, &spaceWidth_, nullptr);
 
-  // Serial.printf("[Greedy] layoutText (provider) called: spaceWidth_=%d, maxWidth=%d\n", spaceWidth_, maxWidth);
-
   int startIndex = provider.getCurrentIndex();
   while (y < maxY) {
     bool isParagraphEnd = false;
     std::vector<LayoutStrategy::Word> line = getNextLine(provider, renderer, maxWidth, isParagraphEnd);
 
-    // Render the line
-    y = renderLine(line, renderer, x, y, maxWidth, config.lineHeight, alignment);
+    // Render the line (unless rendering is disabled)
+    if (!disableRendering) {
+      renderLine(line, renderer, x, y, maxWidth, alignment);
+    }
+
+    y += config.lineHeight;
   }
+
   int endIndex = provider.getCurrentIndex();
   // reset the provider to the start index
   provider.setPosition(startIndex);
@@ -43,11 +47,10 @@ int GreedyLayoutStrategy::layoutText(WordProvider& provider, TextRenderer& rende
   return endIndex;
 }
 
-int16_t GreedyLayoutStrategy::renderLine(const std::vector<LayoutStrategy::Word>& line, TextRenderer& renderer,
-                                         int16_t x, int16_t y, int16_t maxWidth, int16_t lineHeight,
-                                         TextAlignment alignment) {
+void GreedyLayoutStrategy::renderLine(const std::vector<LayoutStrategy::Word>& line, TextRenderer& renderer, int16_t x,
+                                      int16_t y, int16_t maxWidth, TextAlignment alignment) {
   if (line.empty()) {
-    return y + lineHeight;
+    return;
   }
 
   // Calculate line width
@@ -76,11 +79,5 @@ int16_t GreedyLayoutStrategy::renderLine(const std::vector<LayoutStrategy::Word>
     }
   }
 
-  return y + lineHeight;
-}
-
-// Test wrappers
-std::vector<LayoutStrategy::Word> GreedyLayoutStrategy::test_getNextLine(WordProvider& provider, TextRenderer& renderer,
-                                                                         int16_t maxWidth, bool& isParagraphEnd) {
-  return getNextLine(provider, renderer, maxWidth, isParagraphEnd);
+  return;
 }

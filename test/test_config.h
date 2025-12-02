@@ -5,7 +5,8 @@
 namespace TestConfig {
 
 // Default test file paths
-constexpr const char* DEFAULT_TEST_FILE = "data/books/chapter one.txt";
+constexpr const char* DEFAULT_TEST_FILE = "data/books/bobiverse 1.txt";
+// constexpr const char* DEFAULT_TEST_FILE = "data/books/chapter one.txt";
 constexpr const char* FONT_TEST_FILE = "data/font test.txt";
 
 // Display dimensions (typical e-ink display)

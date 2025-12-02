@@ -15,12 +15,12 @@ class GreedyLayoutStrategy : public LayoutStrategy {
   }
 
   // Main interface implementation
-  int layoutText(WordProvider& provider, TextRenderer& renderer, const LayoutConfig& config) override;
+  int layoutText(WordProvider& provider, TextRenderer& renderer, const LayoutConfig& config,
+                 bool disableRendering = false) override;
 
  private:
-  // prev-line helper moved to base class
-  int16_t renderLine(const std::vector<LayoutStrategy::Word>& line, TextRenderer& renderer, int16_t x, int16_t y,
-                     int16_t maxWidth, int16_t lineHeight, TextAlignment alignment);
+  void renderLine(const std::vector<LayoutStrategy::Word>& line, TextRenderer& renderer, int16_t x, int16_t y,
+                  int16_t maxWidth, TextAlignment alignment);
 
  public:
   // Test-only public wrapper to exercise internal line layout helpers from unit tests.

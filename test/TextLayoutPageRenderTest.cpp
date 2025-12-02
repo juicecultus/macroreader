@@ -79,8 +79,8 @@ int main() {
   const int lineSpacing = (int)tbh + TestConfig::TEST_LINE_SPACING;
 
   StringWordProvider provider(fullText);
-  // GreedyLayoutStrategy layout;
-  KnuthPlassLayoutStrategy layout;
+  GreedyLayoutStrategy layout;
+  // KnuthPlassLayoutStrategy layout;
   LayoutStrategy::LayoutConfig layoutConfig;
   layoutConfig.marginLeft = TestConfig::DEFAULT_MARGIN_LEFT;
   layoutConfig.marginRight = TestConfig::DEFAULT_MARGIN_RIGHT;
@@ -90,23 +90,62 @@ int main() {
   layoutConfig.minSpaceWidth = TestConfig::DEFAULT_MIN_SPACE_WIDTH;
   layoutConfig.pageWidth = TestConfig::DISPLAY_WIDTH;
   layoutConfig.pageHeight = TestConfig::DISPLAY_HEIGHT;
-  layoutConfig.alignment = LayoutStrategy::ALIGN_RIGHT;
+  layoutConfig.alignment = LayoutStrategy::ALIGN_LEFT;
 
-  // Traverse the entire document forward, saving each page's start and end indices
+  bool disableRendering = true;  // Disable rendering for performance testing
+
+  // Test mode: false = normal (jump to end of page), true = incremental (move one word at a time)
+  bool incrementalMode = true;
+  // const int maxPages = 1;  // Limit for incremental mode to prevent excessive iterations
+  const int maxPages = 99999;  // Limit for incremental mode to prevent excessive iterations
+
+  // Traverse the entire document forward, and immediately check backward navigation
   std::vector<std::pair<int, int>> pageRanges;  // pair<start, end>
   int pageStart = 0;
   int pageIndex = 0;
 
   while (true) {
-    display.clearScreen(0xFF);
+    if (!disableRendering) {
+      display.clearScreen(0xFF);
+    }
 
     provider.setPosition(pageStart);
 
-    int endPos = layout.layoutText(provider, renderer, layoutConfig);
+    int endPos = layout.layoutText(provider, renderer, layoutConfig, disableRendering);
     // record the start and end positions for this page
     pageRanges.push_back(std::make_pair(pageStart, endPos));
 
-    savePage(pageIndex, "_0");
+    if (!disableRendering) {
+      savePage(pageIndex, "_0");
+    }
+
+    // test backward navigation from current page
+    {
+      int expectedPrevStart = pageRanges[pageIndex].first;
+      int expectedPrevEnd = pageRanges[pageIndex].second;
+
+      int computedPrevStart = layout.getPreviousPageStart(provider, renderer, layoutConfig, endPos);
+
+      // Render the computed previous page to determine its end position
+      if (!disableRendering) {
+        display.clearScreen(0xFF);
+      }
+      provider.setPosition(computedPrevStart);
+      int computedPrevEnd = layout.layoutText(provider, renderer, layoutConfig, disableRendering);
+
+      bool startMatch = (computedPrevStart == expectedPrevStart);
+      bool endMatch = (computedPrevEnd == expectedPrevEnd);
+
+      if (!startMatch || !endMatch) {
+        std::string errorMsg = "Page " + std::to_string(pageIndex) +
+                               " backward check - computedPrevStart=" + std::to_string(computedPrevStart) +
+                               " expectedPrevStart=" + std::to_string(expectedPrevStart) +
+                               ", computedPrevEnd=" + std::to_string(computedPrevEnd) +
+                               " expectedPrevEnd=" + std::to_string(expectedPrevEnd);
+        std::cerr << errorMsg << "\n";
+        runner.expectTrue(false, "Backward navigation from page " + std::to_string(pageIndex), errorMsg);
+      }
+    }
 
     // Stop if we've reached the end of the provider
     if (provider.getPercentage(endPos) >= 1.0f) {
@@ -121,7 +160,31 @@ int main() {
       break;
     }
 
-    pageStart = endPos;
+    // Safety: limit pages in incremental mode
+    if (incrementalMode && pageIndex + 1 >= maxPages) {
+      std::cerr << "Reached max page limit (" << maxPages << ") in incremental mode, stopping.\n";
+      ++pageIndex;
+      break;
+    }
+
+    if (incrementalMode) {
+      // Move one word forward from the start of the current page
+      provider.setPosition(pageStart);
+      layout.test_getNextLineDefault(
+          provider, renderer, layoutConfig.pageWidth - layoutConfig.marginLeft - layoutConfig.marginRight, *(new bool));
+      int nextPos = provider.getCurrentIndex();
+
+      // If we can't move forward, we're done
+      if (nextPos <= pageStart) {
+        std::cerr << "Cannot advance one word from position " << pageStart << ", stopping.\n";
+        ++pageIndex;
+        break;
+      }
+      pageStart = nextPos;
+    } else {
+      // Normal mode: jump to the end of the current page
+      pageStart = endPos;
+    }
     ++pageIndex;
   }
 
@@ -141,37 +204,6 @@ int main() {
   }
   if (rangesOut)
     rangesOut.close();
-
-  // Move backward from the last page and verify previous page starts and ends
-  pageIndex--;
-
-  for (int i = (int)pageRanges.size() - 1; i > 0; --i) {
-    int currentStart = pageRanges[i].first;
-    int expectedPrevStart = pageRanges[i - 1].first;
-    int expectedPrevEnd = pageRanges[i - 1].second;
-
-    int computedPrevStart = layout.getPreviousPageStart(provider, renderer, layoutConfig, currentStart);
-
-    // Render the computed previous page to determine its end position and save it
-    display.clearScreen(0xFF);
-    provider.setPosition(computedPrevStart);
-    int computedPrevEnd = layout.layoutText(provider, renderer, layoutConfig);
-    pageIndex--;
-    // savePage(pageIndex, "_1");
-
-    bool startMatch = (computedPrevStart == expectedPrevStart);
-    bool endMatch = (computedPrevEnd == expectedPrevEnd);
-
-    if (!startMatch || !endMatch) {
-      std::string errorMsg = "Page " + std::to_string(i) + " - computedPrevStart=" + std::to_string(computedPrevStart) +
-                             " expectedPrevStart=" + std::to_string(expectedPrevStart) +
-                             ", computedPrevEnd=" + std::to_string(computedPrevEnd) +
-                             " expectedPrevEnd=" + std::to_string(expectedPrevEnd);
-      runner.expectTrue(false, "Previous page range match", errorMsg);
-    } else {
-      runner.expectTrue(true, "Page " + std::to_string(i) + " previous page range match");
-    }
-  }
 
   return runner.allPassed() ? 0 : 1;
 }

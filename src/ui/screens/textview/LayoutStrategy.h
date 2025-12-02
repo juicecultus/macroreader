@@ -50,7 +50,8 @@ class LayoutStrategy {
 
   // Main layout method: takes words from a provider and renders them
   // Returns the provider character index at the end of the page (end position)
-  virtual int layoutText(WordProvider& provider, TextRenderer& renderer, const LayoutConfig& config) = 0;
+  virtual int layoutText(WordProvider& provider, TextRenderer& renderer, const LayoutConfig& config,
+                         bool disableRendering = false) = 0;
 
   // Calculate the start position of the previous page given current position
   // Calculate the start position of the previous page. A default implementation is

@@ -15,7 +15,8 @@ class KnuthPlassLayoutStrategy : public LayoutStrategy {
   }
 
   // Main interface implementation
-  int layoutText(WordProvider& provider, TextRenderer& renderer, const LayoutConfig& config) override;
+  int layoutText(WordProvider& provider, TextRenderer& renderer, const LayoutConfig& config,
+                 bool disableRendering = false) override;
 
  private:
   // spaceWidth_ is defined in base class
@@ -35,12 +36,13 @@ class KnuthPlassLayoutStrategy : public LayoutStrategy {
   };
 
   // Helper methods
-  int16_t layoutAndRender(const std::vector<Word>& words, TextRenderer& renderer, int16_t x, int16_t y,
-                          int16_t maxWidth, int16_t lineHeight, int16_t maxY, TextAlignment alignment,
-                          bool paragraphEnd = true);
+  void layoutAndRender(const std::vector<Word>& words, TextRenderer& renderer, int16_t x, int16_t y, int16_t maxWidth,
+                       int16_t lineHeight, int16_t maxY, TextAlignment alignment, bool paragraphEnd = true);
   std::vector<size_t> calculateBreaks(const std::vector<Word>& words, int16_t maxWidth);
   float calculateBadness(int16_t actualWidth, int16_t targetWidth);
   float calculateDemerits(float badness, bool isLastLine);
+
+  bool renderingEnabled_ = true;  // Controls whether to actually render text
 };
 
 #endif
