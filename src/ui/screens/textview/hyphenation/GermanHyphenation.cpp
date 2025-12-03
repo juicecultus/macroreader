@@ -99,13 +99,17 @@ std::vector<size_t> hyphenate(const std::string& word) {
   }
 
   auto isInseparablePair = [](const std::u32string& pair) {
-    static const std::vector<std::u32string> pairs = {U"ch", U"ck", U"ph", U"qu", U"tz"};
+    static const std::vector<std::u32string> pairs = {U"ch", U"ck", U"ph", U"qu", U"tz", U"st"};
     for (const auto& p : pairs) {
       if (pair == p) {
         return true;
       }
     }
     return false;
+  };
+
+  auto isDoubleConsonant = [](const std::u32string& pair) {
+    return pair.size() == 2 && pair[0] == pair[1] && isConsonant(pair[0]);
   };
 
   for (size_t i = 0; i + 1 < vowelIndices.size(); ++i) {
@@ -123,20 +127,24 @@ std::vector<size_t> hyphenate(const std::string& word) {
 
     std::u32string cluster(lower.begin() + clusterStart, lower.begin() + clusterEnd);
 
+    // Special handling for "sch" cluster - keep it together with following consonant
     if (cluster.size() >= 3 && matchesCluster(cluster, 0, U"sch")) {
-      boundary = clusterStart;  // Keep "sch" together
+      boundary = clusterStart;  // Keep "sch" together on right side
     }
 
+    // Check for inseparable pairs
     if (boundary == 0 && consonantCount == 2) {
       if (isInseparablePair(cluster)) {
-        boundary = clusterEnd;  // keep digraph with the left syllable
+        boundary = clusterStart;  // Keep pair on right side
       }
     }
 
+    // Try to find a valid onset by checking if entire cluster is allowed
     if (boundary == 0 && isAllowedOnset(cluster)) {
       boundary = clusterStart;
     }
 
+    // Try to find the largest valid onset from the right
     if (boundary == 0 && consonantCount >= 2) {
       for (size_t split = 1; split < cluster.size(); ++split) {
         std::u32string onset(cluster.begin() + split, cluster.end());
@@ -147,22 +155,23 @@ std::vector<size_t> hyphenate(const std::string& word) {
       }
     }
 
+    // Fallback rules
     if (boundary == 0) {
       if (consonantCount == 1) {
         boundary = clusterStart;
       } else if (consonantCount == 2) {
         std::u32string pair = cluster;
         if (isInseparablePair(pair)) {
-          boundary = clusterEnd;
+          boundary = clusterStart;  // Keep pair on right
         } else {
-          boundary = clusterStart + 1;
+          boundary = clusterStart + 1;  // Split in the middle
         }
       } else {  // consonantCount >= 3
         std::u32string lastTwo(lower.begin() + clusterEnd - 2, lower.begin() + clusterEnd);
         if (isInseparablePair(lastTwo)) {
           boundary = clusterEnd - 2;
         } else {
-          boundary = clusterEnd - 1;
+          boundary = clusterEnd - 1;  // Keep last consonant with right syllable
         }
       }
     }
