@@ -85,7 +85,7 @@ void UIManager::showSleepScreen() {
   // show the image with the grayscale antialiasing
   display.displayBuffer(EInkDisplay::FULL_REFRESH);
   display.copyGrayscaleBuffers(bebop_image_lsb, bebop_image_msb);
-  display.displayGrayBuffer();
+  display.displayGrayBuffer(true);
 }
 
 void UIManager::prepareForSleep() {

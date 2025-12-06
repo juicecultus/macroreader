@@ -44,9 +44,9 @@ class EInkDisplay {
   void copyGrayscaleMsbBuffers(const uint8_t* msbBuffer);
 
   void displayBuffer(RefreshMode mode = FAST_REFRESH);
-  void displayGrayBuffer();
+  void displayGrayBuffer(bool turnOffScreen = false);
 
-  void refreshDisplay(RefreshMode mode = FAST_REFRESH);
+  void refreshDisplay(RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false);
 
   // debug function
   void grayscaleRevert();

@@ -131,8 +131,6 @@ void setup() {
     verifyWakeupLongPress();
   }
 
-  delay(1000);  // Allow time for serial to initialize
-
   Serial.println("\n=================================");
   Serial.println("  MicroReader - ESP32-C3 E-Ink");
   Serial.println("=================================");

@@ -368,7 +368,7 @@ void EInkDisplay::grayscaleRevert() {
 
   // Load the revert LUT
   setCustomLUT(true, lut_grayscale_revert);
-  refreshDisplay(FAST_REFRESH);
+  refreshDisplay(FAST_REFRESH, false);
   setCustomLUT(false);
 }
 
@@ -417,20 +417,20 @@ void EInkDisplay::displayBuffer(RefreshMode mode) {
   swapBuffers();
 
   // Refresh the display
-  refreshDisplay(mode);
+  refreshDisplay(mode, false);
 }
 
-void EInkDisplay::displayGrayBuffer() {
+void EInkDisplay::displayGrayBuffer(bool turnOffScreen) {
   drawGrayscale = false;
   inGrayscaleMode = true;
 
   // activate the custom LUT for grayscale rendering and refresh
   setCustomLUT(true, lut_grayscale);
-  refreshDisplay(FAST_REFRESH);
+  refreshDisplay(FAST_REFRESH, turnOffScreen);
   setCustomLUT(false);
 }
 
-void EInkDisplay::refreshDisplay(RefreshMode mode) {
+void EInkDisplay::refreshDisplay(RefreshMode mode, bool turnOffScreen) {
   // Configure Display Update Control 1
   sendCommand(CMD_DISPLAY_UPDATE_CTRL1);
   sendData((mode == FAST_REFRESH) ? CTRL1_NORMAL : CTRL1_BYPASS_RED);  // Configure buffer comparison mode
@@ -454,6 +454,12 @@ void EInkDisplay::refreshDisplay(RefreshMode mode) {
   if (!isScreenOn) {
     isScreenOn = true;
     displayMode |= 0xC0;  // Set CLOCK_ON and ANALOG_ON bits
+  }
+
+  // Turn off screen if requested
+  if (turnOffScreen) {
+    isScreenOn = false;
+    displayMode |= 0x03;  // Set ANALOG_OFF_PHASE and CLOCK_OFF bits
   }
 
   if (mode == FULL_REFRESH) {
