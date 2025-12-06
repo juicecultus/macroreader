@@ -6,14 +6,14 @@
 
 #include <cstring>
 
+#include "../../content/providers/EpubWordProvider.h"
+#include "../../content/providers/FileWordProvider.h"
+#include "../../content/providers/StringWordProvider.h"
 #include "../../core/Buttons.h"
 #include "../../core/SDCardManager.h"
-#include "textview/EpubWordProvider.h"
-#include "textview/FileWordProvider.h"
-#include "textview/GreedyLayoutStrategy.h"
-#include "textview/KnuthPlassLayoutStrategy.h"
-#include "textview/StringWordProvider.h"
-#include "textview/hyphenation/HyphenationStrategy.h"
+#include "../../text/hyphenation/HyphenationStrategy.h"
+#include "../../text/layout/GreedyLayoutStrategy.h"
+#include "../../text/layout/KnuthPlassLayoutStrategy.h"
 
 TextViewerScreen::TextViewerScreen(EInkDisplay& display, TextRenderer& renderer, SDCardManager& sdManager,
                                    UIManager& uiManager)

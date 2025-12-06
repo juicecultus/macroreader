@@ -30,6 +30,10 @@ bool FileWordProvider::hasNextWord() {
   return index_ < fileSize_;
 }
 
+bool FileWordProvider::hasPrevWord() {
+  return index_ > 0;
+}
+
 char FileWordProvider::charAt(size_t pos) {
   if (pos >= fileSize_)
     return '\0';

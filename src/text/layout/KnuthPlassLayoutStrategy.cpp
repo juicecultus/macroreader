@@ -1,8 +1,8 @@
 #include "KnuthPlassLayoutStrategy.h"
 
-#include "../../../rendering/TextRenderer.h"
+#include "../../content/providers/WordProvider.h"
+#include "../../rendering/TextRenderer.h"
 #include "WString.h"
-#include "WordProvider.h"
 #ifdef ARDUINO
 #include <Arduino.h>
 #else
@@ -43,7 +43,11 @@ LayoutStrategy::PageLayout KnuthPlassLayoutStrategy::layoutText(WordProvider& pr
     while (y < maxY && !isParagraphEnd) {
       std::vector<LayoutStrategy::Word> line = getNextLine(provider, renderer, maxWidth, isParagraphEnd);
       y += config.lineHeight;
-      lineCount++;
+
+      // Only count lines that have actual content
+      if (!line.empty()) {
+        lineCount++;
+      }
 
       // iterate line by line until paragraph end
       for (size_t i = 0; i < line.size(); i++) {
@@ -233,6 +237,11 @@ std::vector<size_t> KnuthPlassLayoutStrategy::calculateBreaks(const std::vector<
       if (totalDemerits < minDemerits[j + 1]) {
         minDemerits[j + 1] = totalDemerits;
         prevBreak[j + 1] = i;
+      }
+
+      // If this word was split (hyphenated), we must break the line here
+      if (words[j].wasSplit) {
+        break;
       }
     }
   }

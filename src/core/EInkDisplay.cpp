@@ -121,6 +121,10 @@ EInkDisplay::EInkDisplay(int8_t sclk, int8_t mosi, int8_t cs, int8_t dc, int8_t 
   Serial.printf("[%lu]   SCLK=%d, MOSI=%d, CS=%d, DC=%d, RST=%d, BUSY=%d\n", millis(), sclk, mosi, cs, dc, rst, busy);
 }
 
+EInkDisplay::~EInkDisplay() {
+  // No dynamic memory to clean up (buffers are statically allocated)
+}
+
 void EInkDisplay::begin() {
   Serial.printf("[%lu] EInkDisplay: begin() called\n", millis());
 

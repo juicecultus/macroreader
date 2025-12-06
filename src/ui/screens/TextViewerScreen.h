@@ -1,13 +1,13 @@
 #ifndef TEXT_VIEWER_SCREEN_H
 #define TEXT_VIEWER_SCREEN_H
 
+#include "../../content/providers/StringWordProvider.h"
 #include "../../core/EInkDisplay.h"
 #include "../../core/SDCardManager.h"
 #include "../../rendering/TextRenderer.h"
+#include "../../text/layout/LayoutStrategy.h"
 #include "../UIManager.h"
 #include "Screen.h"
-#include "textview/LayoutStrategy.h"
-#include "textview/StringWordProvider.h"
 
 class TextViewerScreen : public Screen {
  public:

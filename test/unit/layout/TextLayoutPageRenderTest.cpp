@@ -1,3 +1,10 @@
+/**
+ * TextLayoutPageRenderTest.cpp - Text Layout and Page Rendering Test
+ *
+ * Tests page layout and backward navigation functionality.
+ * The provider and layout to test are configured in test_globals.h.
+ */
+
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -6,35 +13,33 @@
 #include <string>
 #include <vector>
 
-#include "../src/core/EInkDisplay.h"
-#include "../src/rendering/TextRenderer.h"
-#include "../src/resources/fonts/NotoSans26.h"
-#include "../src/ui/screens/textview/GreedyLayoutStrategy.h"
-#include "../src/ui/screens/textview/KnuthPlassLayoutStrategy.h"
-#include "../src/ui/screens/textview/StringWordProvider.h"
-#include "mocks/WString.h"
-#include "mocks/platform_stubs.h"
+#include "WString.h"
+#include "core/EInkDisplay.h"
+#include "platform_stubs.h"
+#include "rendering/TextRenderer.h"
+#include "resources/fonts/NotoSans26.h"
 #include "test_config.h"
-#include "test_utils.h"
+#include "test_globals.h"
+#include "text/hyphenation/HyphenationStrategy.h"
 
-// For test build convenience we include some implementation units so the
-// single-file test binary links without changing the global build tasks.
-#include "../src/ui/screens/textview/GreedyLayoutStrategy.cpp"
-#include "../src/ui/screens/textview/KnuthPlassLayoutStrategy.cpp"
-#include "../src/ui/screens/textview/StringWordProvider.cpp"
-
-struct TestRun {
+// Test configuration structure
+struct PageTestConfig {
   std::string name;
-  bool useGreedyLayout;
-  bool incrementalMode;
-  bool disableRendering;
-  int maxPages;
-  int pageStart;
+  bool incrementalMode = false;
+  bool disableRendering = true;
+  int pageStart = 0;
+  int maxPages = 5000;
+
+  std::string getFullName() const {
+    std::string providerName = TestGlobals::getProviderName();
+    std::string layoutName = TestGlobals::getLayoutName();
+    return name + " [" + providerName + " + " + layoutName + "]";
+  }
 };
 
-void runTestConfiguration(const TestRun& testRun, TestUtils::TestRunner& runner, EInkDisplay& display,
-                          TextRenderer& renderer, const String& fullText) {
-  std::cout << "\n=== Running: " << testRun.name << " ===\n";
+void runTestConfiguration(const PageTestConfig& testConfig, TestUtils::TestRunner& runner, EInkDisplay& display,
+                          TextRenderer& renderer) {
+  std::cout << "\n=== Running: " << testConfig.getFullName() << " ===\n";
 
   auto savePage = [&](int pageIndex, String postfix) {
     std::ostringstream ss;
@@ -44,17 +49,14 @@ void runTestConfiguration(const TestRun& testRun, TestUtils::TestRunner& runner,
     display.saveFrameBufferAsPBM(out.c_str());
   };
 
-  StringWordProvider provider(fullText);
+  // Get the global provider and layout
+  TestGlobals::resetProvider();
+  WordProvider& provider = TestGlobals::provider();
+  LayoutStrategy& layout = TestGlobals::layout();
 
-  // Create appropriate layout strategy
-  LayoutStrategy* layout = nullptr;
-  KnuthPlassLayoutStrategy* knuthPlassLayout = nullptr;
-  if (testRun.useGreedyLayout) {
-    layout = new GreedyLayoutStrategy();
-  } else {
-    knuthPlassLayout = new KnuthPlassLayoutStrategy();
-    layout = knuthPlassLayout;
-  }
+  // Check if it's KnuthPlass for line count mismatch checking
+  KnuthPlassLayoutStrategy* knuthPlassLayout = dynamic_cast<KnuthPlassLayoutStrategy*>(&layout);
+
   LayoutStrategy::LayoutConfig layoutConfig;
   layoutConfig.marginLeft = ::TestConfig::DEFAULT_MARGIN_LEFT;
   layoutConfig.marginRight = ::TestConfig::DEFAULT_MARGIN_RIGHT;
@@ -65,24 +67,18 @@ void runTestConfiguration(const TestRun& testRun, TestUtils::TestRunner& runner,
   layoutConfig.pageWidth = ::TestConfig::DISPLAY_WIDTH;
   layoutConfig.pageHeight = ::TestConfig::DISPLAY_HEIGHT;
   layoutConfig.alignment = LayoutStrategy::ALIGN_LEFT;
+  layoutConfig.language = Language::GERMAN;
+
+  // Set the language on the layout strategy
+  layout.setLanguage(layoutConfig.language);
 
   // Traverse the entire document forward, and immediately check backward navigation
   std::vector<std::pair<int, int>> pageRanges;  // pair<start, end>
-  int pageStart = testRun.pageStart;
+  int pageStart = testConfig.pageStart;
   int pageIndex = 0;
 
-  // // move towards the first occurence of the word "vorzuziehen" for initial debugging
-  // while (provider.hasNextWord()) {
-  //   String word = provider.getNextWord();
-  //   if (word == String("vorzuziehen")) {
-  //     pageStart = provider.getCurrentIndex() - word.length();
-  //     provider.setPosition(pageStart);
-  //     break;
-  //   }
-  // }
-
   while (true) {
-    if (!testRun.disableRendering) {
+    if (!testConfig.disableRendering) {
       display.clearScreen(0xFF);
     }
 
@@ -93,28 +89,32 @@ void runTestConfiguration(const TestRun& testRun, TestUtils::TestRunner& runner,
       knuthPlassLayout->resetLineCountMismatch();
     }
 
-    LayoutStrategy::PageLayout pageLayout = layout->layoutText(provider, renderer, layoutConfig);
+    LayoutStrategy::PageLayout pageLayout = layout.layoutText(provider, renderer, layoutConfig);
     int endPos = pageLayout.endPosition;
 
-    if (!testRun.disableRendering) {
-      layout->renderPage(pageLayout, renderer, layoutConfig);
+    if (!testConfig.disableRendering) {
+      layout.renderPage(pageLayout, renderer, layoutConfig);
     }
 
     // Check for line count mismatch in KnuthPlass layout
-    if (knuthPlassLayout && knuthPlassLayout->hasLineCountMismatch()) {
-      std::string errorMsg = testRun.name + " - Page " + std::to_string(pageIndex) +
-                             " line count mismatch - Expected " +
-                             std::to_string(knuthPlassLayout->getExpectedLineCount()) + " lines, got " +
-                             std::to_string(knuthPlassLayout->getActualLineCount());
-      std::cerr << errorMsg << "\n";
-      runner.expectTrue(false, testRun.name + " - Line count check from position " + std::to_string(pageStart),
-                        errorMsg);
+    if (knuthPlassLayout) {
+      if (knuthPlassLayout->hasLineCountMismatch()) {
+        std::string errorMsg = testConfig.name + " - Page " + std::to_string(pageIndex) +
+                               " line count mismatch - Expected " +
+                               std::to_string(knuthPlassLayout->getExpectedLineCount()) + " lines, got " +
+                               std::to_string(knuthPlassLayout->getActualLineCount());
+        std::cerr << errorMsg << "\n";
+        runner.expectTrue(false, testConfig.name + " - Line count check page " + std::to_string(pageIndex), errorMsg);
+      } else {
+        runner.expectTrue(true, testConfig.name + " - Line count check page " + std::to_string(pageIndex), "",
+                          true);  // silent=true
+      }
     }
 
     // record the start and end positions for this page
     pageRanges.push_back(std::make_pair(pageStart, endPos));
 
-    if (!testRun.disableRendering) {
+    if (!testConfig.disableRendering) {
       savePage(pageIndex, "_0");
     }
 
@@ -123,36 +123,39 @@ void runTestConfiguration(const TestRun& testRun, TestUtils::TestRunner& runner,
       int expectedPrevStart = pageRanges[pageIndex].first;
       int expectedPrevEnd = pageRanges[pageIndex].second;
 
-      int computedPrevStart = layout->getPreviousPageStart(provider, renderer, layoutConfig, endPos);
+      int computedPrevStart = layout.getPreviousPageStart(provider, renderer, layoutConfig, endPos);
 
       // Render the computed previous page to determine its end position
-      if (!testRun.disableRendering) {
+      if (!testConfig.disableRendering) {
         display.clearScreen(0xFF);
       }
       provider.setPosition(computedPrevStart);
-      LayoutStrategy::PageLayout prevLayout = layout->layoutText(provider, renderer, layoutConfig);
+      LayoutStrategy::PageLayout prevLayout = layout.layoutText(provider, renderer, layoutConfig);
       int computedPrevEnd = prevLayout.endPosition;
 
-      if (!testRun.disableRendering) {
-        layout->renderPage(prevLayout, renderer, layoutConfig);
+      if (!testConfig.disableRendering) {
+        layout.renderPage(prevLayout, renderer, layoutConfig);
       }
 
       bool startMatch = (computedPrevStart == expectedPrevStart);
       bool endMatch = (computedPrevEnd == expectedPrevEnd);
 
       if (!startMatch || !endMatch) {
-        std::string errorMsg = testRun.name + " - Page " + std::to_string(pageIndex) +
+        std::string errorMsg = testConfig.name + " - Page " + std::to_string(pageIndex) +
                                " backward check - computedPrevStart=" + std::to_string(computedPrevStart) +
                                " expectedPrevStart=" + std::to_string(expectedPrevStart) +
                                ", computedPrevEnd=" + std::to_string(computedPrevEnd) +
                                " expectedPrevEnd=" + std::to_string(expectedPrevEnd);
         std::cerr << errorMsg << "\n";
-        runner.expectTrue(false, testRun.name + " - Backward navigation from page " + std::to_string(pageIndex),
+        runner.expectTrue(false, testConfig.name + " - Backward navigation page " + std::to_string(pageIndex),
                           errorMsg);
 
-        if (!testRun.disableRendering) {
+        if (!testConfig.disableRendering) {
           savePage(pageIndex, "_1");
         }
+      } else {
+        runner.expectTrue(true, testConfig.name + " - Backward navigation page " + std::to_string(pageIndex), "",
+                          true);  // silent=true
       }
     }
 
@@ -170,17 +173,18 @@ void runTestConfiguration(const TestRun& testRun, TestUtils::TestRunner& runner,
     }
 
     // Safety: limit pages
-    if (pageIndex + 1 >= testRun.maxPages) {
-      std::cerr << "Reached max page limit (" << testRun.maxPages << "), stopping.\n";
+    if (pageIndex + 1 >= testConfig.maxPages) {
+      std::cerr << "Reached max page limit (" << testConfig.maxPages << "), stopping.\n";
       ++pageIndex;
       break;
     }
 
-    if (testRun.incrementalMode) {
+    if (testConfig.incrementalMode) {
       // Move one word forward from the start of the current page
       provider.setPosition(pageStart);
-      layout->test_getNextLineDefault(
-          provider, renderer, layoutConfig.pageWidth - layoutConfig.marginLeft - layoutConfig.marginRight, *(new bool));
+      bool dummy;
+      layout.test_getNextLineDefault(
+          provider, renderer, layoutConfig.pageWidth - layoutConfig.marginLeft - layoutConfig.marginRight, dummy);
       int nextPos = provider.getCurrentIndex();
 
       // If we can't move forward, we're done
@@ -198,12 +202,16 @@ void runTestConfiguration(const TestRun& testRun, TestUtils::TestRunner& runner,
   }
 
   std::cout << "Forward traversal produced " << pageRanges.size() << " pages.\n";
-
-  delete layout;
 }
 
-int main() {
+int main(int argc, char* argv[]) {
   TestUtils::TestRunner runner("TextLayout Page Render Test");
+
+  // Initialize global provider and layout from test_globals.h configuration
+  if (!TestGlobals::init()) {
+    std::cerr << "Failed to initialize test globals\n";
+    return 2;
+  }
 
   // Create display with dummy pins
   EInkDisplay display(::TestConfig::DUMMY_PIN, ::TestConfig::DUMMY_PIN, ::TestConfig::DUMMY_PIN,
@@ -215,40 +223,33 @@ int main() {
   // Clear to white (0xFF is white in driver)
   display.clearScreen(0xFF);
 
+  // Initialize font glyph maps for fast lookup
+  initFontGlyphMap(&NotoSans26);
+
   // Render some text onto the frame buffer using the TextRenderer
   TextRenderer renderer(display);
-  // Use our local font
   renderer.setFont(&NotoSans26);
   renderer.setTextColor(TextRenderer::COLOR_BLACK);
-
-  const std::string filepath = ::TestConfig::DEFAULT_TEST_FILE;
-  std::ifstream infile(filepath);
-  if (!infile) {
-    std::cerr << "Failed to open '" << filepath << "'\n";
-    return 1;
-  }
+  renderer.setFrameBuffer(display.getFrameBuffer());
+  renderer.setBitmapType(TextRenderer::BITMAP_BW);
 
   // Ensure output directory exists
   std::filesystem::create_directories(::TestConfig::TEST_OUTPUT_DIR);
 
-  // Read entire file into memory
-  std::string content((std::istreambuf_iterator<char>(infile)), std::istreambuf_iterator<char>());
-  String fullText(content.c_str());
-
   // Define test configurations
-  std::vector<TestRun> testConfigs = {
-      {"Greedy - Incremental All Pages - No Render", true,  true,  true,  99999, 0},
-      {"Greedy - Normal - No Render",                true,  false, true,  99999, 0},
-      {"KnuthPlass - Incremental - No Render",       false, true,  true,  99999, 0},
-      {"KnuthPlass - Normal - No Render",            false, false, true,  99999, 0},
-      {"KnuthPlass - Normal - With Render",          false, false, false, 99999, 0},
-      // {"KnuthPlass - Normal - With Render",          false, false, false, 20,    0},
+  std::vector<PageTestConfig> testConfigs = {
+      {"Incremental All Pages - No Render", true,  true,  0, 5000},
+      {"Normal - No Render",                false, true,  0, 5000},
+      {"Normal - With Render",              false, false, 0, 5000},
   };
 
   // Run all test configurations
   for (const auto& config : testConfigs) {
-    runTestConfiguration(config, runner, display, renderer, fullText);
+    runTestConfiguration(config, runner, display, renderer);
   }
+
+  // Cleanup
+  TestGlobals::cleanup();
 
   return runner.allPassed() ? 0 : 1;
 }

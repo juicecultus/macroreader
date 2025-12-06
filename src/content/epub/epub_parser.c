@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "miniz.h"
+#include "../../lib/miniz.h"
 
 #ifdef ARDUINO
 #define USE_ARDUINO_FILE 1

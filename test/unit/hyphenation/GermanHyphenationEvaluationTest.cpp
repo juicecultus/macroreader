@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "../src/ui/screens/textview/hyphenation/GermanHyphenation.h"
+#include "text/hyphenation/GermanHyphenation.h"
 
 struct TestCase {
   std::string word;

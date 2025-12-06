@@ -9,8 +9,11 @@ class WordProvider {
  public:
   virtual ~WordProvider() = default;
 
-  // Returns true if there are more words to read
+  // Returns true if there are more words to read forward
   virtual bool hasNextWord() = 0;
+
+  // Returns true if there are more words to read backward
+  virtual bool hasPrevWord() = 0;
 
   // Returns the next word as an Arduino `String`, measuring its width using the renderer
   virtual String getNextWord() = 0;

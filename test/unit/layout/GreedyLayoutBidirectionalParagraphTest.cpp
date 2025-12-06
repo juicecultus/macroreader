@@ -1,15 +1,20 @@
 #include <algorithm>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
 
-#include "../src/core/EInkDisplay.h"
-#include "../src/rendering/TextRenderer.h"
-#include "../src/resources/fonts/NotoSans26.h"
-#include "../src/ui/screens/textview/GreedyLayoutStrategy.h"
-#include "../src/ui/screens/textview/StringWordProvider.h"
+#include "content/providers/StringWordProvider.h"
+#include "core/EInkDisplay.h"
+#include "rendering/TextRenderer.h"
+#include "resources/fonts/NotoSans26.h"
 #include "test_config.h"
 #include "test_utils.h"
+#include "text/layout/GreedyLayoutStrategy.h"
+#include "text/layout/KnuthPlassLayoutStrategy.h"
+
+// Include the test factory after all provider/layout headers
+#include "test_factory.h"
 
 static std::string joinLine(const std::vector<LayoutStrategy::Word>& line) {
   std::string out;
@@ -21,25 +26,13 @@ static std::string joinLine(const std::vector<LayoutStrategy::Word>& line) {
   return out;
 }
 
-int main(int argc, char** argv) {
-  TestUtils::TestRunner runner("GreedyLayout Bidirectional Paragraph Test");
-
-  std::string path;
-  if (argc >= 2)
-    path = argv[1];
-  else
-    path = TestConfig::DEFAULT_TEST_FILE;
-
-  std::string content = TestUtils::readFile(path);
-  if (content.empty()) {
-    std::cerr << "Failed to open '" << path << "'\n";
-    return 2;
-  }
+void runBidirectionalParagraphTest(TestUtils::TestRunner& runner, const std::string& content,
+                                   TestFactory::LayoutType layoutType) {
+  std::cout << "\n=== Running with " << TestFactory::layoutTypeName(layoutType) << " ===\n";
 
   // Create two providers for forward and backward scanning
   String s(content.c_str());
   StringWordProvider provider(s);
-  StringWordProvider providerB(s);
 
   // Create display + renderer like other host tests so we can use the real TextRenderer
   EInkDisplay display(TestConfig::DUMMY_PIN, TestConfig::DUMMY_PIN, TestConfig::DUMMY_PIN, TestConfig::DUMMY_PIN,
@@ -48,7 +41,13 @@ int main(int argc, char** argv) {
   TextRenderer renderer(display);
   renderer.setFont(&NotoSans26);
 
-  GreedyLayoutStrategy layout;
+  // Create layout strategy using factory
+  LayoutStrategy* layout = TestFactory::createLayout(layoutType);
+  if (!layout) {
+    std::cerr << "Failed to create layout strategy\n";
+    runner.expectTrue(false, "Create layout strategy");
+    return;
+  }
 
   // Initialize layout (sets internal space width). layoutText will reset provider position.
   LayoutStrategy::LayoutConfig cfg;
@@ -63,7 +62,7 @@ int main(int argc, char** argv) {
   cfg.pageHeight = TestConfig::DISPLAY_HEIGHT;
   cfg.alignment = LayoutStrategy::ALIGN_LEFT;
 
-  layout.layoutText(provider, renderer, cfg);
+  layout->layoutText(provider, renderer, cfg);
 
   const int16_t maxWidth = static_cast<int16_t>(cfg.pageWidth - cfg.marginLeft - cfg.marginRight);
 
@@ -89,7 +88,7 @@ int main(int argc, char** argv) {
     while (provider.hasNextWord() && !reachedParagraphEnd) {
       bool isParagraphEnd = false;
       int startPos = provider.getCurrentIndex();
-      auto line = layout.test_getNextLine(provider, renderer, maxWidth, isParagraphEnd);
+      auto line = layout->test_getNextLineDefault(provider, renderer, maxWidth, isParagraphEnd);
       int endPos = provider.getCurrentIndex();
 
       std::string lineText = joinLine(line);
@@ -105,7 +104,7 @@ int main(int argc, char** argv) {
     while (provider.getCurrentIndex() > 0) {
       bool isParagraphEnd = false;
       int endPos = provider.getCurrentIndex();
-      auto line = layout.test_getPrevLine(provider, renderer, maxWidth, isParagraphEnd);
+      auto line = layout->test_getPrevLine(provider, renderer, maxWidth, isParagraphEnd);
       int startPos = provider.getCurrentIndex();
 
       std::string lineText = joinLine(line);
@@ -193,7 +192,54 @@ int main(int argc, char** argv) {
     provider.setPosition(paragraphEndPos);
   }
 
-  std::cout << "\nProcessed " << paragraphNum << " paragraphs with " << totalLines << " total lines\n";
+  std::cout << "Processed " << paragraphNum << " paragraphs with " << totalLines << " total lines\n";
+
+  delete layout;
+}
+
+int main(int argc, char** argv) {
+  TestUtils::TestRunner runner("Layout Bidirectional Paragraph Test");
+
+  // Parse command line arguments for layout selection
+  // Usage: test.exe [path] [layout]
+  //   layout: "greedy" or "knuthplass"
+  std::string path;
+  TestFactory::LayoutType layoutType = TestFactory::g_defaultLayoutType;
+
+  if (argc >= 2) {
+    std::string arg1 = argv[1];
+    if (arg1 == "greedy") {
+      layoutType = TestFactory::LayoutType::GREEDY;
+    } else if (arg1 == "knuthplass") {
+      layoutType = TestFactory::LayoutType::KNUTH_PLASS;
+    } else {
+      path = arg1;
+    }
+  }
+  if (argc >= 3) {
+    std::string arg2 = argv[2];
+    if (arg2 == "greedy") {
+      layoutType = TestFactory::LayoutType::GREEDY;
+    } else if (arg2 == "knuthplass") {
+      layoutType = TestFactory::LayoutType::KNUTH_PLASS;
+    }
+  }
+
+  if (path.empty()) {
+    path = TestConfig::DEFAULT_TEST_FILE;
+  }
+
+  std::string content = TestUtils::readFile(path);
+  if (content.empty()) {
+    std::cerr << "Failed to open '" << path << "'\n";
+    return 2;
+  }
+
+  // Initialize font glyph maps for fast lookup
+  initFontGlyphMap(&NotoSans26);
+
+  // Run the test with the selected layout strategy
+  runBidirectionalParagraphTest(runner, content, layoutType);
 
   return runner.allPassed() ? 0 : 1;
 }

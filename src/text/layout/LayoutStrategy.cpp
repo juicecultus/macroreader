@@ -1,10 +1,10 @@
 #include "LayoutStrategy.h"
 
-#include "../../../rendering/TextRenderer.h"
+#include "../../content/providers/WordProvider.h"
+#include "../../rendering/TextRenderer.h"
+#include "../hyphenation/GermanHyphenation.h"
+#include "../hyphenation/HyphenationStrategy.h"
 #include "WString.h"
-#include "WordProvider.h"
-#include "hyphenation/GermanHyphenation.h"
-#include "hyphenation/HyphenationStrategy.h"
 
 #ifdef ARDUINO
 #include <Arduino.h>
@@ -38,7 +38,7 @@ std::vector<LayoutStrategy::Word> LayoutStrategy::getNextLine(WordProvider& prov
     int16_t bx = 0, by = 0;
     uint16_t bw = 0, bh = 0;
     renderer.getTextBounds(text.c_str(), 0, 0, &bx, &by, &bw, &bh);
-    LayoutStrategy::Word word{text, static_cast<int16_t>(bw)};
+    LayoutStrategy::Word word{text, static_cast<int16_t>(bw), 0, 0, false};
 
     // Check for breaks - breaks are returned as special words
     if (word.text == String("\n")) {
@@ -73,7 +73,7 @@ std::vector<LayoutStrategy::Word> LayoutStrategy::getNextLine(WordProvider& prov
         int16_t bx2 = 0, by2 = 0;
         uint16_t bw2 = 0, bh2 = 0;
         renderer.getTextBounds(firstPart.c_str(), 0, 0, &bx2, &by2, &bw2, &bh2);
-        line.push_back({firstPart, static_cast<int16_t>(bw2)});
+        line.push_back({firstPart, static_cast<int16_t>(bw2), 0, 0, true});  // wasSplit = true
 
         // Move provider position: after the split point
         // For existing hyphens, skip past the hyphen character (+1)
@@ -90,6 +90,13 @@ std::vector<LayoutStrategy::Word> LayoutStrategy::getNextLine(WordProvider& prov
       currentWidth += spaceNeeded;
     }
   }
+
+  // // output the words in the line
+  // for (size_t i = 0; i < line.size(); i++) {
+  //   Serial.printf(line[i].text.c_str());
+  //   Serial.print(";");
+  // }
+  // Serial.println();
 
   return line;
 }
@@ -112,7 +119,7 @@ std::vector<LayoutStrategy::Word> LayoutStrategy::getPrevLine(WordProvider& prov
     int16_t bx = 0, by = 0;
     uint16_t bw = 0, bh = 0;
     renderer.getTextBounds(text.c_str(), 0, 0, &bx, &by, &bw, &bh);
-    LayoutStrategy::Word word{text, static_cast<int16_t>(bw)};
+    LayoutStrategy::Word word{text, static_cast<int16_t>(bw), 0, 0, false};
 
     // Check for breaks - breaks are returned as special words
     if (word.text == String("\n")) {
@@ -153,7 +160,7 @@ std::vector<LayoutStrategy::Word> LayoutStrategy::getPrevLine(WordProvider& prov
         int16_t bx2 = 0, by2 = 0;
         uint16_t bw2 = 0, bh2 = 0;
         renderer.getTextBounds(secondPart.c_str(), 0, 0, &bx2, &by2, &bw2, &bh2);
-        line.insert(line.begin(), {secondPart, static_cast<int16_t>(bw2)});
+        line.insert(line.begin(), {secondPart, static_cast<int16_t>(bw2), 0, 0, false});
 
         // Move provider position to the split point
         provider.setPosition(wordStartIndex + split.position);

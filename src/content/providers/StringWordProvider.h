@@ -10,6 +10,7 @@ class StringWordProvider : public WordProvider {
   ~StringWordProvider();
 
   bool hasNextWord() override;
+  bool hasPrevWord() override;
 
   String getNextWord() override;
   String getPrevWord() override;

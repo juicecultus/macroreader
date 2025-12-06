@@ -29,6 +29,7 @@ class LayoutStrategy {
     int16_t width;
     int16_t x;
     int16_t y;
+    bool wasSplit;  // True if this word was split (hyphenated) and must end the line
   };
 
   struct LayoutConfig {

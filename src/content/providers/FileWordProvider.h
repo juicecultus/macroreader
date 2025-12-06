@@ -18,6 +18,7 @@ class FileWordProvider : public WordProvider {
   }
 
   bool hasNextWord() override;
+  bool hasPrevWord() override;
   String getNextWord() override;
   String getPrevWord() override;
 

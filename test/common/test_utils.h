@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "mocks/WString.h"
+#include "WString.h"
 
 namespace TestUtils {
 

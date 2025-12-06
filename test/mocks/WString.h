@@ -61,6 +61,32 @@ class String {
       end = (int)s_.size();
     return String(s_.substr(start, end - start));
   }
+  String substring(int start) const {
+    if (start < 0)
+      start = 0;
+    if (start > (int)s_.size())
+      return String("");
+    return String(s_.substr(start));
+  }
+  int lastIndexOf(char c) const {
+    size_t pos = s_.rfind(c);
+    return (pos == std::string::npos) ? -1 : static_cast<int>(pos);
+  }
+  int indexOf(char c, int start = 0) const {
+    if (start < 0)
+      start = 0;
+    size_t pos = s_.find(c, start);
+    return (pos == std::string::npos) ? -1 : static_cast<int>(pos);
+  }
+  int indexOf(const char* str, int start = 0) const {
+    if (!str || start < 0)
+      return -1;
+    size_t pos = s_.find(str, start);
+    return (pos == std::string::npos) ? -1 : static_cast<int>(pos);
+  }
+  bool isEmpty() const {
+    return s_.empty();
+  }
   String& operator+=(char c) {
     s_ += c;
     return *this;

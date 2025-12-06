@@ -7,8 +7,8 @@
 #include "core/Buttons.h"
 #include "core/EInkDisplay.h"
 #include "rendering/TextRenderer.h"
+#include "text/layout/LayoutStrategy.h"
 #include "ui/screens/Screen.h"
-#include "ui/screens/textview/LayoutStrategy.h"
 
 class SDCardManager;
 

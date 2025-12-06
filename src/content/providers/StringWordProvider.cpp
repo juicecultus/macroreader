@@ -1,17 +1,15 @@
 #include "StringWordProvider.h"
 
-// NOTE: To keep this class testable without pulling in platform-specific
-// graphics/Arduino headers, do not depend on TextRenderer methods here.
-// Width measurement is simplified to the character count of the word so
-// unit tests can instantiate and exercise this class without stubbing
-// the entire graphics stack.
-
 StringWordProvider::StringWordProvider(const String& text) : text_(text), index_(0), prevIndex_(0) {}
 
 StringWordProvider::~StringWordProvider() {}
 
 bool StringWordProvider::hasNextWord() {
   return index_ < text_.length();
+}
+
+bool StringWordProvider::hasPrevWord() {
+  return index_ > 0;
 }
 
 String StringWordProvider::getNextWord() {
