@@ -79,7 +79,7 @@ EpubWordProvider::EpubWordProvider(const char* path, size_t bufSize)
 
     // Position parser at first node for reading
     parser_->read();
-    
+
     // Find the position of the first actual content by reading the first word
     // Save position before first word, then reset
     size_t startPos = parser_->getFilePosition();
@@ -107,7 +107,7 @@ EpubWordProvider::EpubWordProvider(const char* path, size_t bufSize)
     }
 
     // Open the first chapter (index 0)
-    if (!openChapter(43)) {
+    if (!openChapter(0)) {
       delete epubReader_;
       epubReader_ = nullptr;
       return;
@@ -181,7 +181,7 @@ bool EpubWordProvider::openChapter(int chapterIndex) {
 
   // Position parser at first node for reading
   parser_->read();
-  
+
   // Find the position of the first actual content by reading the first word
   // Save position before first word, then reset
   size_t startPos = parser_->getFilePosition();

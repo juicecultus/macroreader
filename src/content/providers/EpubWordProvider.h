@@ -63,8 +63,8 @@ class EpubWordProvider : public WordProvider {
   SimpleXmlParser* parser_ = nullptr;
   int currentChapter_ = 0;  // Current chapter index (0-based)
 
-  size_t prevFilePos_ = 0;  // Previous parser position for ungetWord()
-  size_t fileSize_;         // Total file size for percentage calculation
+  size_t prevFilePos_ = 0;      // Previous parser position for ungetWord()
+  size_t fileSize_;             // Total file size for percentage calculation
   size_t firstContentPos_ = 0;  // Position of first readable content in chapter
 };
 
