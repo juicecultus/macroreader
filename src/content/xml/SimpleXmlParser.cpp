@@ -786,126 +786,124 @@ bool SimpleXmlParser::seekToFilePosition(size_t pos) {
   if (pos == file_.size()) {
     filePos_ = pos;
     currentNodeType_ = None;
+    currentName_ = "";
+    isEmptyElement_ = false;
+    attributes_.clear();
+    textNodeStartPos_ = 0;
+    textNodeEndPos_ = 0;
+    textNodeCurrentPos_ = 0;
+    hasPeekedTextNodeChar_ = false;
+    hasPeekedPrevTextNodeChar_ = false;
     return true;
   }
 
-  // Check if we're still within the current text node
-  if (currentNodeType_ == Text && pos >= textNodeStartPos_ && pos < textNodeEndPos_) {
-    // We're still in the same text node, just update position
-    filePos_ = pos;
-    textNodeCurrentPos_ = pos;
-    return true;
-  }
-
-  // First, check if we're inside a tag (between '<' and '>')
-  // If so, find the tag start and parse it
-  char charAtPos = getByteAt(pos);
-
-  // Scan backward from pos to find either '>' or '<'
+  // Check if position is inside a text node (between '>' and '<')
+  // Scan backward to find the nearest '>' or '<'
   size_t scanBack = pos;
-  bool foundTagStart = false;
-  bool insideTag = false;
+  bool foundTextStart = false;
+  size_t textStart = 0;
 
   while (scanBack > 0) {
     scanBack--;
     char c = getByteAt(scanBack);
     if (c == '>') {
       // Found end of previous tag - pos is in text content after this tag
-      break;
-    }
-    if (c == '<') {
-      // Found start of a tag - pos might be inside this tag
-      foundTagStart = true;
-      // Check if there's a '>' between this '<' and pos
-      bool hasCloseBeforePos = false;
-      for (size_t i = scanBack + 1; i <= pos; i++) {
-        if (getByteAt(i) == '>') {
-          hasCloseBeforePos = true;
-          break;
-        }
-      }
-      if (!hasCloseBeforePos) {
-        // We're inside this tag
-        insideTag = true;
-        // Parse this tag
-        filePos_ = scanBack;
-        read();
-        filePos_ = scanBack;
-        return true;
-      }
-      break;
-    }
-  }
-
-  // We're in text content - find the full text node boundaries
-  // Scan backward to find where text starts (right after '>')
-  size_t textStart = 0;
-  scanBack = pos;
-  while (scanBack > 0) {
-    scanBack--;
-    char c = getByteAt(scanBack);
-    if (c == '>') {
       textStart = scanBack + 1;
+      foundTextStart = true;
       break;
     }
     if (c == '<') {
-      // This shouldn't happen if we're in text, but handle it
-      textStart = scanBack;
-      break;
-    }
-  }
-
-  // Scan forward to find where text ends (the next '<')
-  size_t textEnd = pos;
-  while (textEnd < file_.size()) {
-    char c = getByteAt(textEnd);
-    if (c == '<') {
-      break;
-    }
-    textEnd++;
-  }
-
-  // Check if this text node is whitespace-only
-  bool hasNonWhitespace = false;
-  for (size_t i = textStart; i < textEnd; i++) {
-    char c = getByteAt(i);
-    if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
-      hasNonWhitespace = true;
-      break;
-    }
-  }
-
-  if (hasNonWhitespace) {
-    // Set up as a text node
-    currentNodeType_ = Text;
-    textNodeStartPos_ = textStart;
-    textNodeEndPos_ = textEnd;
-    textNodeCurrentPos_ = pos;
-    filePos_ = textStart;
-    currentName_ = "";
-    isEmptyElement_ = false;
-    attributes_.clear();
-    hasPeekedTextNodeChar_ = false;
-    hasPeekedPrevTextNodeChar_ = false;
-  } else {
-    // Whitespace-only text - find the preceding element
-    if (textStart > 0) {
-      // Position at the '>' before the whitespace
-      filePos_ = textStart;
-      // Read backward to get the element
-      if (!readBackward()) {
-        filePos_ = pos;
-        currentNodeType_ = None;
-      }
-    } else {
+      // Found start of a tag - pos is inside a tag, not text
+      // Just set file position and let read() handle it
       filePos_ = pos;
       currentNodeType_ = None;
+      currentName_ = "";
+      isEmptyElement_ = false;
+      attributes_.clear();
+      textNodeStartPos_ = 0;
+      textNodeEndPos_ = 0;
+      textNodeCurrentPos_ = 0;
+      hasPeekedTextNodeChar_ = false;
+      hasPeekedPrevTextNodeChar_ = false;
+      return true;
     }
   }
+
+  // If we're at position 0 and didn't find '>', we're at the start
+  if (!foundTextStart && scanBack == 0) {
+    // Check if first char is '<' (tag) or text
+    if (getByteAt(0) == '<') {
+      filePos_ = pos;
+      currentNodeType_ = None;
+      currentName_ = "";
+      isEmptyElement_ = false;
+      attributes_.clear();
+      textNodeStartPos_ = 0;
+      textNodeEndPos_ = 0;
+      textNodeCurrentPos_ = 0;
+      hasPeekedTextNodeChar_ = false;
+      hasPeekedPrevTextNodeChar_ = false;
+      return true;
+    }
+    textStart = 0;
+    foundTextStart = true;
+  }
+
+  if (foundTextStart) {
+    // Scan forward to find where text ends (the next '<')
+    size_t textEnd = pos;
+    while (textEnd < file_.size()) {
+      char c = getByteAt(textEnd);
+      if (c == '<') {
+        break;
+      }
+      textEnd++;
+    }
+
+    // Check if this is actual text content (has non-whitespace)
+    // Also check if we're actually inside the text (not at the boundary)
+    bool hasNonWhitespace = false;
+    for (size_t i = textStart; i < textEnd; i++) {
+      char c = getByteAt(i);
+      if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+        hasNonWhitespace = true;
+        break;
+      }
+    }
+
+    // Only set up as text node if:
+    // 1. There's actual content (non-whitespace)
+    // 2. The seek position is actually inside the text, not at the boundary
+    if (hasNonWhitespace && pos < textEnd && pos >= textStart) {
+      // Set up as a text node - this allows reading characters directly
+      currentNodeType_ = Text;
+      textNodeStartPos_ = textStart;
+      textNodeEndPos_ = textEnd;
+      textNodeCurrentPos_ = pos;
+      filePos_ = pos;
+      currentName_ = "";
+      isEmptyElement_ = false;
+      attributes_.clear();
+      hasPeekedTextNodeChar_ = false;
+      hasPeekedPrevTextNodeChar_ = false;
+      return true;
+    }
+  }
+
+  // Default: just set file position, let read() handle parsing
+  filePos_ = pos;
+  currentNodeType_ = None;
+  currentName_ = "";
+  isEmptyElement_ = false;
+  attributes_.clear();
+  textNodeStartPos_ = 0;
+  textNodeEndPos_ = 0;
+  textNodeCurrentPos_ = 0;
+  hasPeekedTextNodeChar_ = false;
+  hasPeekedPrevTextNodeChar_ = false;
 
   return true;
 }
-
 void SimpleXmlParser::restoreState(size_t pos, NodeType nodeType, size_t textStart, size_t textEnd,
                                    const String& elementName, bool isEmpty) {
   if (!file_) {

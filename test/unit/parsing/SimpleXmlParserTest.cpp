@@ -262,6 +262,62 @@ struct ElementInfo {
   SimpleXmlParser::NodeType type;
 };
 
+// Helper struct for storing complete node state during seek tests
+struct SavedNodeState {
+  size_t filePosition;
+  SimpleXmlParser::NodeType nodeType;
+  String name;
+  bool isEmpty;
+  size_t textNodeStart;
+  size_t textNodeEnd;
+  String fullText;  // Complete text content for text nodes
+
+  String toString() const {
+    String result;
+    switch (nodeType) {
+      case SimpleXmlParser::Element:
+        result = "Element: <" + name + ">";
+        if (isEmpty)
+          result += " (self-closing)";
+        break;
+      case SimpleXmlParser::Text: {
+        char buf[32];
+        sprintf(buf, "%zu", fullText.length());
+        String preview = fullText.length() > 50 ? fullText.substring(0, 50) + "..." : fullText;
+        result = "Text: \"" + preview + "\" [" + String(buf) + " chars]";
+        break;
+      }
+      case SimpleXmlParser::EndElement:
+        result = "EndElement: </" + name + ">";
+        break;
+      case SimpleXmlParser::Comment:
+        result = "Comment";
+        break;
+      case SimpleXmlParser::ProcessingInstruction:
+        result = "ProcessingInstruction: " + name;
+        break;
+      default:
+        result = "Other node type: " + String((int)nodeType);
+        break;
+    }
+    return result;
+  }
+
+  bool matches(const SavedNodeState& other) const {
+    if (nodeType != other.nodeType)
+      return false;
+    if (name != other.name)
+      return false;
+    if (isEmpty != other.isEmpty)
+      return false;
+    if (nodeType == SimpleXmlParser::Text) {
+      if (fullText != other.fullText)
+        return false;
+    }
+    return true;
+  }
+};
+
 // Test: Seek to various file positions and verify correct node context
 void testSeekToPosition(TestUtils::TestRunner& runner, const char* xhtmlPath) {
   std::cout << "\n=== Test: Seek To File Position ===\n";
@@ -274,45 +330,318 @@ void testSeekToPosition(TestUtils::TestRunner& runner, const char* xhtmlPath) {
     return;
   }
 
-  // First, do a forward pass to collect comprehensive position data
+  // ============================================================
+  // Phase 1: Forward pass - collect all node states with positions
+  // ============================================================
+  std::cout << "\n--- Phase 1: Forward pass - collecting all node states ---\n";
+
+  std::vector<SavedNodeState> forwardStates;
+  size_t positionBeforeRead = 0;
+  while (true) {
+    positionBeforeRead = xmlReader.getFilePosition();
+    if (!xmlReader.read()) {
+      break;
+    }
+
+    SavedNodeState state;
+    state.nodeType = xmlReader.getNodeType();
+    state.name = xmlReader.getName();
+    state.isEmpty = xmlReader.isEmptyElement();
+    state.textNodeStart = xmlReader.getTextNodeStart();
+    state.textNodeEnd = xmlReader.getTextNodeEnd();
+    state.fullText = "";
+
+    // For text nodes, use textNodeStart as the position to seek to
+    // For other nodes, use the position before read() was called
+    if (state.nodeType == SimpleXmlParser::Text) {
+      state.filePosition = state.textNodeStart;
+      while (xmlReader.hasMoreTextChars()) {
+        state.fullText += xmlReader.readTextNodeCharForward();
+      }
+    } else {
+      state.filePosition = positionBeforeRead;
+    }
+
+    forwardStates.push_back(state);
+  }
+
+  std::cout << "  Collected " << forwardStates.size() << " nodes in forward pass\n";
+
+  // Print first few nodes
+  int printCount = std::min((size_t)5, forwardStates.size());
+  for (int i = 0; i < printCount; i++) {
+    std::cout << "    [" << i << "] @ " << forwardStates[i].filePosition << ": " << forwardStates[i].toString().c_str()
+              << "\n";
+  }
+
+  // ============================================================
+  // Phase 2: Backward pass - collect all node states with positions
+  // ============================================================
+  std::cout << "\n--- Phase 2: Backward pass - collecting all node states ---\n";
+
+  xmlReader.seekToFilePosition(xmlReader.getFileSize());
+
+  std::vector<SavedNodeState> backwardStates;
+  while (xmlReader.readBackward()) {
+    SavedNodeState state;
+    state.nodeType = xmlReader.getNodeType();
+    state.name = xmlReader.getName();
+    state.isEmpty = xmlReader.isEmptyElement();
+    state.textNodeStart = xmlReader.getTextNodeStart();
+    state.textNodeEnd = xmlReader.getTextNodeEnd();
+    state.fullText = "";
+
+    // For text nodes, use textNodeStart as the position to seek to
+    // For other nodes, use getFilePosition() which should be at node start after readBackward
+    if (state.nodeType == SimpleXmlParser::Text) {
+      state.filePosition = state.textNodeStart;
+      while (xmlReader.hasMoreTextCharsBackward()) {
+        state.fullText = String(xmlReader.readPrevTextNodeChar()) + state.fullText;
+      }
+    } else {
+      state.filePosition = xmlReader.getFilePosition();
+    }
+
+    backwardStates.push_back(state);
+  }
+
+  std::cout << "  Collected " << backwardStates.size() << " nodes in backward pass\n";
+
+  // Print first few backward nodes
+  printCount = std::min((size_t)5, backwardStates.size());
+  for (int i = 0; i < printCount; i++) {
+    std::cout << "    [" << i << "] @ " << backwardStates[i].filePosition << ": "
+              << backwardStates[i].toString().c_str() << "\n";
+  }
+
+  // ============================================================
+  // Phase 3: Verify forward states by seeking to each position
+  // ============================================================
+  std::cout << "\n--- Phase 3: Verify all forward positions by seeking ---\n";
+
+  int forwardMismatches = 0;
+  for (size_t i = 0; i < forwardStates.size(); i++) {
+    const SavedNodeState& expected = forwardStates[i];
+
+    bool seekOk = xmlReader.seekToFilePosition(expected.filePosition);
+    if (!seekOk) {
+      std::cout << "  ERROR: Failed to seek to forward position " << expected.filePosition << " for node " << i << "\n";
+      forwardMismatches++;
+      continue;
+    }
+
+    // First, verify that getFilePosition() returns the position we seeked to
+    size_t posAfterSeek = xmlReader.getFilePosition();
+    if (posAfterSeek != expected.filePosition) {
+      std::cout << "  POSITION MISMATCH at node " << i << ": seeked to " << expected.filePosition
+                << " but getFilePosition() returned " << posAfterSeek << "\n";
+      forwardMismatches++;
+      continue;
+    }
+
+    // For text nodes, seekToFilePosition already sets up the text node state
+    // For other nodes, we need to call read() to parse the node
+    if (xmlReader.getNodeType() != SimpleXmlParser::Text) {
+      if (!xmlReader.read()) {
+        std::cout << "  ERROR: Failed to read node at forward position " << expected.filePosition << " for node " << i
+                  << "\n";
+        forwardMismatches++;
+        continue;
+      }
+    }
+
+    // Read the node at this position
+    SavedNodeState actual;
+    actual.nodeType = xmlReader.getNodeType();
+    actual.name = xmlReader.getName();
+    actual.isEmpty = xmlReader.isEmptyElement();
+    actual.textNodeStart = xmlReader.getTextNodeStart();
+    actual.textNodeEnd = xmlReader.getTextNodeEnd();
+    actual.fullText = "";
+
+    if (actual.nodeType == SimpleXmlParser::Text) {
+      while (xmlReader.hasMoreTextChars()) {
+        actual.fullText += xmlReader.readTextNodeCharForward();
+      }
+    }
+
+    if (!expected.matches(actual)) {
+      std::cout << "  MISMATCH at forward node " << i << " (pos " << expected.filePosition << "):\n";
+      std::cout << "    Expected: " << expected.toString().c_str() << "\n";
+      std::cout << "    Actual:   " << actual.toString().c_str() << "\n";
+      forwardMismatches++;
+    }
+  }
+
+  std::cout << "  Forward verification: " << (forwardStates.size() - forwardMismatches) << "/" << forwardStates.size()
+            << " positions match\n";
+  runner.expectTrue(forwardMismatches == 0, "All forward positions should produce exact same output when seeked to");
+
+  // ============================================================
+  // Phase 4: Verify backward states by seeking to each position
+  // ============================================================
+  std::cout << "\n--- Phase 4: Verify all backward positions by seeking ---\n";
+
+  int backwardMismatches = 0;
+  for (size_t i = 0; i < backwardStates.size(); i++) {
+    const SavedNodeState& expected = backwardStates[i];
+
+    bool seekOk = xmlReader.seekToFilePosition(expected.filePosition);
+    if (!seekOk) {
+      std::cout << "  ERROR: Failed to seek to backward position " << expected.filePosition << " for node " << i
+                << "\n";
+      backwardMismatches++;
+      continue;
+    }
+
+    // For text nodes, seekToFilePosition already sets up the text node state
+    // For other nodes, we need to call read() to parse the node
+    if (xmlReader.getNodeType() != SimpleXmlParser::Text) {
+      if (!xmlReader.read()) {
+        std::cout << "  ERROR: Failed to read node at backward position " << expected.filePosition << " for node " << i
+                  << "\n";
+        backwardMismatches++;
+        continue;
+      }
+    }
+
+    // Read the node at this position
+    SavedNodeState actual;
+    actual.nodeType = xmlReader.getNodeType();
+    actual.name = xmlReader.getName();
+    actual.isEmpty = xmlReader.isEmptyElement();
+    actual.textNodeStart = xmlReader.getTextNodeStart();
+    actual.textNodeEnd = xmlReader.getTextNodeEnd();
+    actual.fullText = "";
+
+    if (actual.nodeType == SimpleXmlParser::Text) {
+      while (xmlReader.hasMoreTextChars()) {
+        actual.fullText += xmlReader.readTextNodeCharForward();
+      }
+    }
+
+    if (!expected.matches(actual)) {
+      std::cout << "  MISMATCH at backward node " << i << " (pos " << expected.filePosition << "):\n";
+      std::cout << "    Expected: " << expected.toString().c_str() << "\n";
+      std::cout << "    Actual:   " << actual.toString().c_str() << "\n";
+      backwardMismatches++;
+    }
+  }
+
+  std::cout << "  Backward verification: " << (backwardStates.size() - backwardMismatches) << "/"
+            << backwardStates.size() << " positions match\n";
+  runner.expectTrue(backwardMismatches == 0, "All backward positions should produce exact same output when seeked to");
+
+  // ============================================================
+  // Phase 5: Cross-verify forward and backward positions match
+  // ============================================================
+  std::cout << "\n--- Phase 5: Cross-verify forward and backward states ---\n";
+
+  runner.expectTrue(forwardStates.size() == backwardStates.size(),
+                    "Forward and backward should have same number of nodes");
+
+  if (forwardStates.size() == backwardStates.size()) {
+    int crossMismatches = 0;
+    for (size_t i = 0; i < forwardStates.size(); i++) {
+      size_t backwardIndex = backwardStates.size() - 1 - i;
+      const SavedNodeState& fwd = forwardStates[i];
+      const SavedNodeState& bwd = backwardStates[backwardIndex];
+
+      if (!fwd.matches(bwd)) {
+        std::cout << "  Cross-mismatch at node " << i << ":\n";
+        std::cout << "    Forward:  " << fwd.toString().c_str() << "\n";
+        std::cout << "    Backward: " << bwd.toString().c_str() << "\n";
+        crossMismatches++;
+      }
+    }
+    std::cout << "  Cross-verification: " << (forwardStates.size() - crossMismatches) << "/" << forwardStates.size()
+              << " nodes match\n";
+    runner.expectTrue(crossMismatches == 0, "Forward and backward states should match when reversed");
+  }
+
+  // ============================================================
+  // Phase 6: Random access verification - seek in random order
+  // ============================================================
+  std::cout << "\n--- Phase 6: Random access verification ---\n";
+
+  // Create a shuffled index order (simple pseudo-random)
+  std::vector<size_t> randomOrder;
+  for (size_t i = 0; i < forwardStates.size(); i++) {
+    randomOrder.push_back(i);
+  }
+  // Simple shuffle using a basic LCG-like approach
+  for (size_t i = randomOrder.size() - 1; i > 0; i--) {
+    size_t j = (i * 31337 + 12345) % (i + 1);
+    std::swap(randomOrder[i], randomOrder[j]);
+  }
+
+  int randomMismatches = 0;
+  size_t randomTestCount = std::min((size_t)100, forwardStates.size());  // Test up to 100 random positions
+  for (size_t t = 0; t < randomTestCount; t++) {
+    size_t i = randomOrder[t];
+    const SavedNodeState& expected = forwardStates[i];
+
+    bool seekOk = xmlReader.seekToFilePosition(expected.filePosition);
+    if (!seekOk) {
+      randomMismatches++;
+      continue;
+    }
+
+    // For text nodes, seekToFilePosition already sets up the text node state
+    // For other nodes, we need to call read() to parse the node
+    if (xmlReader.getNodeType() != SimpleXmlParser::Text) {
+      if (!xmlReader.read()) {
+        randomMismatches++;
+        continue;
+      }
+    }
+
+    SavedNodeState actual;
+    actual.nodeType = xmlReader.getNodeType();
+    actual.name = xmlReader.getName();
+    actual.isEmpty = xmlReader.isEmptyElement();
+    actual.fullText = "";
+
+    if (actual.nodeType == SimpleXmlParser::Text) {
+      while (xmlReader.hasMoreTextChars()) {
+        actual.fullText += xmlReader.readTextNodeCharForward();
+      }
+    }
+
+    if (!expected.matches(actual)) {
+      std::cout << "  Random access mismatch at node " << i << " (pos " << expected.filePosition << "):\n";
+      std::cout << "    Expected: " << expected.toString().c_str() << "\n";
+      std::cout << "    Actual:   " << actual.toString().c_str() << "\n";
+      randomMismatches++;
+    }
+  }
+
+  std::cout << "  Random access verification: " << (randomTestCount - randomMismatches) << "/" << randomTestCount
+            << " positions match\n";
+  runner.expectTrue(randomMismatches == 0, "Random access to stored positions should produce exact same output");
+
+  // ============================================================
+  // Additional tests below using the collected data
+  // ============================================================
+
+  // Build textNodes and elements from forwardStates for compatibility with remaining tests
   std::vector<TextNodeInfo> textNodes;
   std::vector<ElementInfo> elements;
 
-  std::cout << "\nCollecting reference positions (comprehensive scan)...\n";
-
-  int textCount = 0;
-  int elemCount = 0;
-  while (xmlReader.read()) {
-    if (xmlReader.getNodeType() == SimpleXmlParser::Text) {
+  for (const auto& state : forwardStates) {
+    if (state.nodeType == SimpleXmlParser::Text && state.fullText.length() > 0) {
       TextNodeInfo info;
-      info.startPos = xmlReader.getTextNodeStart();
-      info.endPos = xmlReader.getTextNodeEnd();
-      info.fullText = "";
-      while (xmlReader.hasMoreTextChars()) {
-        info.fullText += xmlReader.readTextNodeCharForward();
-      }
-      if (info.fullText.length() > 0) {
-        textNodes.push_back(info);
-        if (textCount < 5) {
-          std::cout << "  Text[" << textCount << "] @ " << info.startPos << "-" << info.endPos << ": \""
-                    << info.fullText.substring(0, 30).c_str() << (info.fullText.length() > 30 ? "..." : "") << "\"\n";
-        }
-        textCount++;
-      }
-    } else if (xmlReader.getNodeType() == SimpleXmlParser::Element ||
-               xmlReader.getNodeType() == SimpleXmlParser::EndElement) {
+      info.startPos = state.textNodeStart;
+      info.endPos = state.textNodeEnd;
+      info.fullText = state.fullText;
+      textNodes.push_back(info);
+    } else if (state.nodeType == SimpleXmlParser::Element || state.nodeType == SimpleXmlParser::EndElement) {
       ElementInfo info;
-      info.position = xmlReader.getFilePosition();
-      info.name = xmlReader.getName();
-      info.isEmpty = xmlReader.isEmptyElement();
-      info.type = xmlReader.getNodeType();
+      info.position = state.filePosition;
+      info.name = state.name;
+      info.isEmpty = state.isEmpty;
+      info.type = state.nodeType;
       elements.push_back(info);
-      if (elemCount < 5) {
-        std::cout << "  Elem[" << elemCount << "] @ " << info.position << ": "
-                  << (info.type == SimpleXmlParser::EndElement ? "</" : "<") << info.name.c_str()
-                  << (info.isEmpty ? "/>" : ">") << "\n";
-      }
-      elemCount++;
     }
   }
 
@@ -423,13 +752,8 @@ void testSeekToPosition(TestUtils::TestRunner& runner, const char* xhtmlPath) {
       std::cout << "  Using text node with " << longNode->fullText.length() << " chars\n";
 
       // Seek to various positions in different orders
-      std::vector<size_t> offsets = {0,
-                                     longNode->fullText.length() - 1,
-                                     longNode->fullText.length() / 2,
-                                     longNode->fullText.length() / 4,
-                                     longNode->fullText.length() * 3 / 4,
-                                     10,
-                                     5};
+      size_t len = longNode->fullText.length();
+      std::vector<size_t> offsets = {0, len - 1, len / 2, len / 4, (len * 3) / 4, 10, 5};
 
       for (size_t offset : offsets) {
         if (offset >= longNode->fullText.length())
