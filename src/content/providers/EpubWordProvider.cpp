@@ -54,7 +54,7 @@ static bool isBlockElement(const String& name) {
   if (name.length() == 0)
     return false;
 
-  const char* blockElements[] = {"p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "br"};
+  const char* blockElements[] = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "br"};
   for (size_t i = 0; i < sizeof(blockElements) / sizeof(blockElements[0]); i++) {
     const char* blockElem = blockElements[i];
     size_t blockLen = strlen(blockElem);
@@ -110,6 +110,39 @@ bool EpubWordProvider::skipElement(const String& elementName, bool forward) {
     }
   }
   return true;
+}
+
+void EpubWordProvider::skipToNextContent() {
+  // Skip ahead through whitespace and non-content elements to position
+  // the cursor at the next actual content (or end of file).
+  // This ensures hasNextWord() returns false when there's no more content.
+  while (true) {
+    SimpleXmlParser::NodeType nextType = parser_->getNodeType();
+    if (nextType == SimpleXmlParser::None || nextType == SimpleXmlParser::EndOfFile) {
+      break;  // End of document
+    }
+    if (nextType == SimpleXmlParser::Text) {
+      // Found text - check if it has actual content (not just whitespace)
+      if (parser_->hasMoreTextChars()) {
+        char peek = parser_->peekTextNodeChar();
+        // If there's non-whitespace content, stop here
+        if (peek != ' ' && peek != '\n' && peek != '\t' && peek != '\r') {
+          break;
+        }
+      }
+    }
+    if (nextType == SimpleXmlParser::Element) {
+      String nextName = parser_->getName();
+      // If it's a block element or content element, stop here
+      if (isBlockElement(nextName) || !isNonContentElement(nextName)) {
+        break;
+      }
+    }
+    // Keep scanning
+    if (!parser_->read()) {
+      break;
+    }
+  }
 }
 
 EpubWordProvider::EpubWordProvider(const char* path, size_t bufSize)
@@ -425,9 +458,11 @@ String EpubWordProvider::getNextWord() {
       // Check if this is a block element end tag
       String elementName = parser_->getName();
       if (isBlockElement(elementName)) {
-        // Move past this end element first, then return newline
-        // This way getCurrentIndex() before getNextWord() returns the element start
+        // Move past this end element first
         parser_->read();
+        // Skip ahead to find the next content (or reach end of file)
+        // This ensures hasNextWord() returns false when there's no more content
+        skipToNextContent();
         return String('\n');
       }
       // Inline end tag (like </span>) - just move to next node
@@ -448,8 +483,10 @@ String EpubWordProvider::getNextWord() {
       if (isBlockElement(elementName)) {
         // Check if this is a self-closing element (like <br/>)
         if (parser_->isEmptyElement()) {
-          // Move past this element first, then return newline
+          // Move past this element first
           parser_->read();
+          // Skip ahead to find the next content (or reach end of file)
+          skipToNextContent();
           return String('\n');
         }
       }

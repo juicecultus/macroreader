@@ -58,6 +58,11 @@ class EpubWordProvider : public WordProvider {
   // Returns true if successful, false if reached end/beginning of document
   bool skipElement(const String& elementName, bool forward);
 
+  // Skip ahead to the next content (text or block element) or end of file
+  // Used after returning a newline for block element end tags to ensure hasNextWord() returns false
+  // when there's no more actual content
+  void skipToNextContent();
+
   bool valid_ = false;
   bool isEpub_ = false;  // True if source is EPUB, false if direct XHTML
   size_t bufSize_ = 0;
