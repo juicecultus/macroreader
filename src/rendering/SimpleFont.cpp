@@ -1,41 +1,32 @@
 #include "SimpleFont.h"
 
-// Helper to initialize the glyph map for a font
-void initFontGlyphMap(const SimpleGFXfont* font) {
-  if (!font || font->glyphCount == 0) {
-    return;
+// Helper to find a glyph index by codepoint using binary search
+// The glyph array must be sorted by codepoint
+int findGlyphIndex(const SimpleGFXfont* font, uint32_t codepoint) {
+  if (!font || !font->glyph || font->glyphCount == 0) {
+    return -1;
   }
 
-  // Create the map if it doesn't exist
-  if (!font->glyphMap) {
-    font->glyphMap = new std::unordered_map<uint32_t, uint16_t>();
+  int low = 0;
+  int high = font->glyphCount - 1;
+
+  while (low <= high) {
+    int mid = low + (high - low) / 2;
+    uint32_t midCodepoint = font->glyph[mid].codepoint;
+
+    if (midCodepoint == codepoint) {
+      return mid;
+    } else if (midCodepoint < codepoint) {
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
   }
 
-  // Clear and rebuild
-  font->glyphMap->clear();
-  font->glyphMap->reserve(font->glyphCount);
-
-  for (uint16_t i = 0; i < font->glyphCount; i++) {
-    (*font->glyphMap)[font->glyph[i].codepoint] = i;
-  }
+  return -1;  // Not found
 }
 
-// Helper to initialize glyph maps for all fonts in a family
-void initFontFamilyGlyphMaps(const FontFamily* family) {
-  if (!family)
-    return;
-
-  if (family->regular)
-    initFontGlyphMap(family->regular);
-  if (family->bold)
-    initFontGlyphMap(family->bold);
-  if (family->italic)
-    initFontGlyphMap(family->italic);
-  if (family->boldItalic)
-    initFontGlyphMap(family->boldItalic);
-}
-
-// New: Helper to get a font variant from a family (returns nullptr if not available)
+// Helper to get a font variant from a family (returns nullptr if not available)
 const SimpleGFXfont* getFontVariant(const FontFamily* family, FontStyle style) {
   if (!family) {
     return nullptr;

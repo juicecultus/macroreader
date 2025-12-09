@@ -54,7 +54,7 @@ void TextViewerScreen::loadSettingsFromFile() {
     return;
 
   char buf[512];
-  size_t r = sdManager.readFileToBuffer("/Microreader/textviewer_state.txt", buf, sizeof(buf));
+  size_t r = sdManager.readFileToBuffer("/microreader/textviewer_state.txt", buf, sizeof(buf));
   if (r == 0)
     return;
 
@@ -132,7 +132,7 @@ void TextViewerScreen::saveSettingsToFile() {
              String(layoutConfig.minSpaceWidth) + "," + String(layoutConfig.pageWidth) + "," +
              String(layoutConfig.pageHeight);
 
-  if (!sdManager.writeFile("/Microreader/textviewer_state.txt", content)) {
+  if (!sdManager.writeFile("/microreader/textviewer_state.txt", content)) {
     Serial.println("TextViewerScreen: Failed to write textviewer_state.txt");
   }
 }

@@ -147,13 +147,6 @@ void setup() {
   Serial.println("=================================");
   Serial.println();
 
-  // Initialize font glyph maps for fast lookup
-  Serial.println("Initializing font lookup maps...");
-  initFontGlyphMap(&Font14);
-  initFontGlyphMap(&Font27);
-  initFontFamilyGlyphMaps(&notoSansFamily);
-  Serial.println("Font maps initialized");
-
   // Initialize buttons
   buttons.begin();
   Serial.println("Buttons initialized");
@@ -165,9 +158,9 @@ void setup() {
   // Initialize SD card manager
   sdManager.begin();
 
-  // Ensure /Microreader/ directory exists
+  // Ensure /microreader/ directory exists
   if (sdManager.ready()) {
-    sdManager.ensureDirectoryExists("/Microreader");
+    sdManager.ensureDirectoryExists("/microreader");
   }
 
   // Write debug log

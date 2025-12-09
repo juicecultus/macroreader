@@ -8,10 +8,8 @@
 #include "NotoSans26Italic.h"
 
 // Font definitions
-const SimpleGFXfont Font14 = {Font14Bitmaps, nullptr,  nullptr, Font14Glyphs,      305, 16,
-                              nullptr,       "Font14", 14,      FontStyle::REGULAR};
-const SimpleGFXfont Font27 = {Font27Bitmaps, nullptr,  nullptr, Font27Glyphs,      305, 29,
-                              nullptr,       "Font27", 27,      FontStyle::REGULAR};
+const SimpleGFXfont Font14 = {Font14Bitmaps, nullptr, nullptr, Font14Glyphs, 305, 16, "Font14", 14, FontStyle::REGULAR};
+const SimpleGFXfont Font27 = {Font27Bitmaps, nullptr, nullptr, Font27Glyphs, 305, 29, "Font27", 27, FontStyle::REGULAR};
 
 // Font families (group variants together)
 // Example: NotoSans family

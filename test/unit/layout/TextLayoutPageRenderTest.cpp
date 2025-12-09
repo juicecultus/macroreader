@@ -223,9 +223,6 @@ int main(int argc, char* argv[]) {
   // Clear to white (0xFF is white in driver)
   display.clearScreen(0xFF);
 
-  // Initialize font glyph maps for fast lookup
-  initFontFamilyGlyphMaps(&notoSansFamily);
-
   // Render some text onto the frame buffer using the TextRenderer
   TextRenderer renderer(display);
   renderer.setFontFamily(&notoSansFamily);

@@ -79,7 +79,7 @@ EpubReader::EpubReader(const char* epubPath)
 #ifdef TEST_BUILD
   extractDir_ = "test/output/epub_" + epubFilename;
 #else
-  extractDir_ = "/epub_" + epubFilename;
+  extractDir_ = "/microreader/epub_" + epubFilename;
 #endif
   Serial.printf("Extract directory: %s\n", extractDir_.c_str());
 

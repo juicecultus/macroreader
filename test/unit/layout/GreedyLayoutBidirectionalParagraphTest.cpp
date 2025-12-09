@@ -337,9 +337,6 @@ int main(int argc, char** argv) {
                       TestConfig::DUMMY_PIN, TestConfig::DUMMY_PIN);
   display.begin();
 
-  // Initialize font glyph maps for fast lookup
-  initFontGlyphMap(&NotoSans26);
-
   // Create renderer
   TextRenderer renderer(display);
   renderer.setFont(&NotoSans26);

@@ -62,17 +62,6 @@ static uint32_t decodeUtf8Codepoint(const unsigned char*& p) {
   return UTF8_REPLACEMENT_CHAR;
 }
 
-
-// Helper function to find a glyph index by codepoint
-static int findGlyphIndex(const SimpleGFXfont* font, uint32_t codepoint) {
-  if (!font || !font->glyphMap) {
-    return -1;
-  }
-
-  auto it = font->glyphMap->find(codepoint);
-  return (it != font->glyphMap->end()) ? it->second : -1;
-}
-
 TextRenderer::TextRenderer(EInkDisplay& display) : display(display) {
   Serial.printf("[%lu] TextRenderer: Constructor called\n", millis());
 }
