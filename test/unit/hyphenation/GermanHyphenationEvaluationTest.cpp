@@ -142,7 +142,7 @@ EvaluationResult evaluateWord(const TestCase& testCase) {
 }
 
 int main(int argc, char* argv[]) {
-  std::string testDataFile = "data/german_hyphenation_tests.txt";
+  std::string testDataFile = "resources/german_hyphenation_tests.txt";
 
   if (argc > 1) {
     testDataFile = argv[1];

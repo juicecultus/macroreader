@@ -4,11 +4,10 @@
 #include <vector>
 
 #include "content/xml/SimpleXmlParser.h"
+#include "test_globals.h"
 #include "test_utils.h"
 
 namespace {
-
-const char* kFixturePath = "data/books/5F7754037AF147879447BB32918DD7A6.xhtml";
 
 struct NodeInfo {
   SimpleXmlParser::NodeType type;
@@ -77,12 +76,12 @@ std::vector<NodeInfo> collectBackwardNodes(SimpleXmlParser& parser) {
 
 void testForwardBackwardSymmetry(TestUtils::TestRunner& runner) {
   SimpleXmlParser parser;
-  runner.expectTrue(parser.open(kFixturePath), "open fixture");
+  runner.expectTrue(parser.open(TestGlobals::g_testXhtmlPath), "open fixture");
 
   auto forward = collectForwardNodes(parser);
   parser.close();
 
-  runner.expectTrue(parser.open(kFixturePath), "reopen for backward");
+  runner.expectTrue(parser.open(TestGlobals::g_testXhtmlPath), "reopen for backward");
   auto backward = collectBackwardNodes(parser);
   parser.close();
 
@@ -112,7 +111,7 @@ void testForwardBackwardSymmetry(TestUtils::TestRunner& runner) {
 
 void testSeekToTextNode(TestUtils::TestRunner& runner) {
   SimpleXmlParser parser;
-  runner.expectTrue(parser.open(kFixturePath), "open fixture for text seek");
+  runner.expectTrue(parser.open(TestGlobals::g_testXhtmlPath), "open fixture for text seek");
 
   // Find first text node
   while (parser.read()) {
@@ -148,9 +147,9 @@ void testSeekToTextNode(TestUtils::TestRunner& runner) {
 
 void testSeekToMiddleOfText(TestUtils::TestRunner& runner) {
   SimpleXmlParser parser;
-  runner.expectTrue(parser.open(kFixturePath), "open fixture for mid-text seek");
+  runner.expectTrue(parser.open(TestGlobals::g_testXhtmlPath), "open fixture for mid-text seek");
 
-  auto fileContent = TestUtils::readFile(kFixturePath);
+  auto fileContent = TestUtils::readFile(TestGlobals::g_testXhtmlPath);
   runner.expectTrue(!fileContent.empty(), "fixture loaded");
 
   // Find a text node

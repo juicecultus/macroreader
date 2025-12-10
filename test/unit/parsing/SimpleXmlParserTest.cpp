@@ -4,7 +4,7 @@
 #include <vector>
 
 #include "content/xml/SimpleXmlParser.h"
-#include "test_config.h"
+#include "test_globals.h"
 #include "test_utils.h"
 
 struct NodeSnapshot {
@@ -212,7 +212,7 @@ void testMidTextNavigation(TestUtils::TestRunner& runner, const char* path) {
 
 int main() {
   TestUtils::TestRunner runner("SimpleXmlParser Position Test");
-  const char* xhtmlPath = "data/books/5F7754037AF147879447BB32918DD7A6.xhtml";
+  const char* xhtmlPath = TestGlobals::g_testXhtmlPath;
 
   readForwardNodes(runner, xhtmlPath);
   testForwardBackwardSymmetry(runner, xhtmlPath);

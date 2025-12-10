@@ -7,6 +7,11 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
 endif()
 
+# MSVC: Enable UTF-8 source and execution character set
+if(MSVC)
+  add_compile_options(/utf-8)
+endif()
+
 # Test include directories
 include_directories(
   ${CMAKE_SOURCE_DIR}/test

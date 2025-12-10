@@ -18,7 +18,7 @@
 
 #include "content/css/CssParser.h"
 #include "content/epub/EpubReader.h"
-#include "test_config.h"
+#include "test_globals.h"
 #include "test_utils.h"
 
 // Test toggles - set to false to skip specific tests
@@ -36,9 +36,6 @@
 
 // Test configuration
 namespace EpubReaderTests {
-
-// Path to test EPUB file
-const char* TEST_EPUB_PATH = "resources/books/mabus.epub";
 
 /**
  * Test: EPUB file is valid
@@ -161,8 +158,8 @@ void testExtractDir(TestUtils::TestRunner& runner, EpubReader& reader) {
   runner.expectTrue(extractDir.length() > 0, "Extract directory should not be empty");
 
   // Check that extract dir contains epub filename (without extension)
-  // Extract the base name from TEST_EPUB_PATH for comparison
-  std::string testPath = TEST_EPUB_PATH;
+  // Extract the base name from g_testFilePath for comparison
+  std::string testPath = TestGlobals::g_testFilePath;
   size_t lastSlash = testPath.rfind('/');
   std::string baseName = (lastSlash != std::string::npos) ? testPath.substr(lastSlash + 1) : testPath;
   size_t lastDot = baseName.rfind('.');
@@ -628,16 +625,16 @@ void testCssStringParsing(TestUtils::TestRunner& runner) {
 
 int main() {
   TestUtils::TestRunner runner("EPUB Reader Test Suite");
-  std::cout << "Test EPUB: " << EpubReaderTests::TEST_EPUB_PATH << "\n";
+  std::cout << "Test EPUB: " << TestGlobals::g_testFilePath << "\n";
 
-  if (!std::filesystem::exists(EpubReaderTests::TEST_EPUB_PATH)) {
-    std::cout << "\nSkipping EpubReader tests: missing fixture at " << EpubReaderTests::TEST_EPUB_PATH << "\n";
+  if (!std::filesystem::exists(TestGlobals::g_testFilePath)) {
+    std::cout << "\nSkipping EpubReader tests: missing fixture at " << TestGlobals::g_testFilePath << "\n";
     return 0;
   }
 
   // Load EPUB once for all tests
   std::cout << "\nLoading EPUB...\n";
-  EpubReader reader(EpubReaderTests::TEST_EPUB_PATH);
+  EpubReader reader(TestGlobals::g_testFilePath);
   std::cout << "EPUB loaded.\n";
 
 #if TEST_EPUB_VALIDITY

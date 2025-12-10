@@ -1,9 +1,27 @@
-Set-StrictMode -Version Latest -Off
+Set-StrictMode -Version Latest
 $testDir = Join-Path $PSScriptRoot '..'
-$binDir = Join-Path $testDir 'build\\bin'
 
-if (-Not (Test-Path $binDir)) {
-    Write-Error "Tests not built. Run test/scripts/build_tests.ps1 first."
+# Candidate directories where CMake/IDEs place test executables. We'll pick the first that exists and contains executables.
+$candidateBins = @(
+    (Join-Path $testDir 'build\bin'),
+    (Join-Path $testDir 'build\test\Debug'),
+    (Join-Path $testDir 'build\test\Release'),
+    (Join-Path $testDir 'build\x64\Debug\test'),
+    (Join-Path $testDir 'build'),
+    (Join-Path $testDir 'build\test')
+)
+
+$binDir = $null
+foreach ($cand in $candidateBins) {
+    if (Test-Path $cand) {
+        # Does this folder contain .exe files?
+        $exeCount = (Get-ChildItem -Path $cand -Filter *.exe -File -ErrorAction SilentlyContinue | Measure-Object).Count
+        if ($exeCount -gt 0) { $binDir = $cand; break }
+    }
+}
+
+if (-Not $binDir) {
+    Write-Error "Tests not built or no test executables found. Run test/scripts/build_tests.ps1 first. Checked candidates: $($candidateBins -join ', ')"
     exit 1
 }
 
