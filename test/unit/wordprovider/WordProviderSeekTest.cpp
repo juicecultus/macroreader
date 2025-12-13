@@ -27,7 +27,7 @@ constexpr bool TEST_FORWARD_SEEK_CONSISTENCY = true;
 constexpr bool TEST_BACKWARD_SEEK_CONSISTENCY = true;
 constexpr bool TEST_BIDIRECTIONAL_SEEK_CONSISTENCY = true;
 constexpr bool TEST_READ_ALL_THEN_VERIFY = true;
-constexpr bool TEST_MID_WORD_SEEK_RECONSTRUCT = false;
+constexpr bool TEST_MID_WORD_SEEK_RECONSTRUCT = true;
 constexpr int MAX_WORDS = 500;
 constexpr int MAX_FAILURES_TO_REPORT = 10;
 
@@ -36,6 +36,7 @@ struct WordInfo {
   String word;
   int positionBefore;
   int positionAfter;
+  FontStyle style;
 };
 
 /**
@@ -433,8 +434,10 @@ void testMidWordSeekReconstruct(TestUtils::TestRunner& runner) {
   while (provider.hasNextWord() && (int)words.size() < MAX_WORDS) {
     WordInfo info;
     info.positionBefore = provider.getCurrentIndex();
-    info.word = provider.getNextWord().text;
+    StyledWord sw = provider.getNextWord();
+    info.word = sw.text;
     info.positionAfter = provider.getCurrentIndex();
+    info.style = sw.style;
 
     if (info.word.length() == 0) {
       break;
@@ -466,7 +469,7 @@ void testMidWordSeekReconstruct(TestUtils::TestRunner& runner) {
 
   for (size_t wordIdx = 0; wordIdx < words.size() && failCount < MAX_FAILURES_TO_REPORT; wordIdx++) {
     const WordInfo& info = words[wordIdx];
-    int wordLen = info.positionAfter - info.positionBefore;
+    int wordLen = info.word.length();
 
     // Test seeking to each position inside the word
     for (int offset = 1; offset < wordLen && failCount < MAX_FAILURES_TO_REPORT; offset++) {
@@ -474,7 +477,8 @@ void testMidWordSeekReconstruct(TestUtils::TestRunner& runner) {
       testedPositions++;
 
       // Seek to mid-word position
-      provider.setPosition(midPosition);
+      provider.setPosition(info.positionBefore);
+      provider.consumeChars(offset);
 
       // Verify we're inside a word
       if (!provider.isInsideWord()) {
@@ -486,29 +490,34 @@ void testMidWordSeekReconstruct(TestUtils::TestRunner& runner) {
       int posBeforeLeft = provider.getCurrentIndex();
 
       // Read left part (from word start to current position)
-      String leftPart = provider.getPrevWord().text;
+      StyledWord leftWord = provider.getPrevWord();
+      String leftPart = leftWord.text;
+      FontStyle leftStyle = leftWord.style;
       int posAfterLeft = provider.getCurrentIndex();
 
       // Now seek back to the mid position to read right
-      provider.setPosition(midPosition);
+      provider.setPosition(info.positionBefore);
+      provider.consumeChars(offset);
 
       // Read right part (from current position to word end)
-      String rightPart = provider.getNextWord().text;
+      StyledWord rightWord = provider.getNextWord();
+      String rightPart = rightWord.text;
+      FontStyle rightStyle = rightWord.style;
       int posAfterRight = provider.getCurrentIndex();
 
       // Reconstruct the word
       String reconstructed = leftPart + rightPart;
 
       // Compare with original
-      if (reconstructed != info.word) {
+      if (reconstructed != info.word || leftStyle != info.style || rightStyle != info.style) {
         std::cout << "\n  *** RECONSTRUCTION MISMATCH at word index " << wordIdx << " ***\n";
         std::cout << "    Original word:    \"" << info.word.c_str() << "\" (pos " << info.positionBefore << "-"
-                  << info.positionAfter << ")\n";
+                  << info.positionAfter << ") style=" << (int)info.style << "\n";
         std::cout << "    Mid position:     " << midPosition << " (offset " << offset << ")\n";
         std::cout << "    Left part:        \"" << leftPart.c_str() << "\" (pos " << posBeforeLeft << "->"
-                  << posAfterLeft << ")\n";
+                  << posAfterLeft << ") style=" << (int)leftStyle << "\n";
         std::cout << "    Right part:       \"" << rightPart.c_str() << "\" (pos " << midPosition << "->"
-                  << posAfterRight << ")\n";
+                  << posAfterRight << ") style=" << (int)rightStyle << "\n";
         std::cout << "    Reconstructed:    \"" << reconstructed.c_str() << "\"\n";
         failCount++;
       } else {

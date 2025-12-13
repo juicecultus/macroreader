@@ -549,6 +549,14 @@ int FileWordProvider::consumeChars(int n) {
 
   int consumed = 0;
   while (consumed < n && index_ < fileSize_) {
+    // Check for ESC token first
+    size_t tokenLen = parseEscTokenAtPos(index_);
+    if (tokenLen > 0) {
+      // Skip ESC token without counting as consumed
+      index_ += tokenLen;
+      continue;
+    }
+
     char c = charAt(index_);
     index_++;
     // Skip carriage returns, they don't count as consumed characters
