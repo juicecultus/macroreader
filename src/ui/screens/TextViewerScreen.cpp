@@ -1,7 +1,6 @@
 #include "TextViewerScreen.h"
 
 #include <Arduino.h>
-#include <resources/fonts/Font14.h>
 #include <resources/fonts/FontDefinitions.h>
 #include <resources/fonts/FontManager.h>
 
@@ -266,7 +265,7 @@ void TextViewerScreen::showPage() {
       }
     }
 
-    textRenderer.setFont(&Font14);
+    textRenderer.setFont(getMainFont());
 
     // Build indicator string: "ChapterName - Z%" or just "Z%" if no chapter name
     String indicator;
