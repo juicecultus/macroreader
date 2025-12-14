@@ -1,6 +1,10 @@
 #include "EpubReader.h"
 
+#include <cstring>
 #include <vector>
+#ifdef TEST_BUILD
+#include <filesystem>
+#endif
 
 #include "../xml/SimpleXmlParser.h"
 
@@ -31,6 +35,14 @@ static bool findNextElement(SimpleXmlParser* parser, const char* elementName) {
   return false;
 }
 
+// Memory logging helper
+static void log_memory(const char* where) {
+  uint32_t freeHeap = ESP.getFreeHeap();
+  uint32_t heapSize = ESP.getHeapSize();
+  uint32_t minFree = ESP.getMinFreeHeap();
+  Serial.printf("  [MEM] %s: Free=%u, Total=%u, MinFree=%u\n", where, freeHeap, heapSize, minFree);
+}
+
 // File handle for extraction callback
 static File g_extract_file;
 
@@ -58,8 +70,13 @@ static int append_to_string_callback(const void* data, size_t size, void* user_d
   return 1;
 }
 
-EpubReader::EpubReader(const char* epubPath)
-    : epubPath_(epubPath), valid_(false), reader_(nullptr), spine_(nullptr), spineCount_(0) {
+EpubReader::EpubReader(const char* epubPath, bool cleanCacheOnStart)
+    : epubPath_(epubPath),
+      valid_(false),
+      reader_(nullptr),
+      spine_(nullptr),
+      spineCount_(0),
+      cleanCacheOnStart_(cleanCacheOnStart) {
   Serial.printf("\n=== EpubReader: Opening %s ===\n", epubPath);
 
   // measure start time
@@ -76,6 +93,8 @@ EpubReader::EpubReader(const char* epubPath)
   Serial.printf("  EPUB file verified, size: %u bytes\n", fileSize);
 
   Serial.printf("  Time taken to verify EPUB file:  %lu ms\n", millis() - startTime);
+
+  log_memory("constructor: after verify");
 
   // Create extraction directory based on EPUB filename
   String epubFilename = String(epubPath);
@@ -98,21 +117,39 @@ EpubReader::EpubReader(const char* epubPath)
 #endif
   Serial.printf("  Extract directory: %s\n", extractDir_.c_str());
 
+  // Clean cache if requested
+  if (cleanCacheOnStart_) {
+    Serial.println("  Cleaning extract directory on startup...");
+    cleanExtractDir();
+  }
+
   if (!ensureExtractDirExists()) {
     return;
   }
+  log_memory("constructor: after ensureExtractDirExists");
+
+  // // Extract entire EPUB into extractDir_ and close the zip afterwards
+  // Serial.println("  Extracting entire EPUB to cache (this may take a while)...");
+  // if (!extractAll()) {
+  //   Serial.println("WARNING: extractAll encountered errors or skipped some files");
+  // }
+  // // Close the zip to release memory used by central directory parsing
+  // closeEpub();
+  // log_memory("constructor: after ensureExtractDirExists");
 
   // Parse container.xml to get content.opf path
   if (!parseContainer()) {
     Serial.println("ERROR: Failed to parse container.xml");
     return;
   }
+  log_memory("constructor: after parseContainer");
 
   // Parse content.opf to get spine items
   if (!parseContentOpf()) {
     Serial.println("ERROR: Failed to parse content.opf");
     return;
   }
+  log_memory("constructor: after parseContentOpf");
 
   // Parse toc.ncx to get table of contents (optional - don't fail if missing)
   if (!tocNcxPath_.isEmpty()) {
@@ -122,6 +159,7 @@ EpubReader::EpubReader(const char* epubPath)
   } else {
     Serial.println("INFO: No toc.ncx found in this EPUB");
   }
+  log_memory("constructor: after parseTocNcx");
 
   // Parse CSS files for styling information (optional - don't fail if missing)
   if (!cssFiles_.empty()) {
@@ -192,6 +230,37 @@ bool EpubReader::ensureExtractDirExists() {
     }
     Serial.printf("Created directory: %s\n", extractDir_.c_str());
   }
+  return true;
+}
+
+// Recursively remove a directory using SD/File API on embedded target
+static void removeDirRecursive(const String& path) {
+  File dir = SD.open(path.c_str());
+  if (!dir)
+    return;
+  if (dir.isDirectory()) {
+    File file = dir.openNextFile();
+    while (file) {
+      String name = String(file.name());
+      String fullPath = path + "/" + name;
+      if (file.isDirectory()) {
+        removeDirRecursive(fullPath);
+      } else {
+        SD.remove(fullPath.c_str());
+      }
+      file.close();
+      file = dir.openNextFile();
+    }
+  }
+  // Try to remove directory itself (may not be supported on all SD implementations)
+  SD.remove(path.c_str());
+}
+
+bool EpubReader::cleanExtractDir() {
+  if (extractDir_.isEmpty())
+    return true;
+  removeDirRecursive(extractDir_);
+  Serial.printf("  Removed extract directory (device): %s\n", extractDir_.c_str());
   return true;
 }
 
@@ -271,7 +340,18 @@ bool EpubReader::extractFile(const char* filename) {
   }
 
   unsigned long t0 = millis();
+  // Log memory state before extraction
+  uint32_t heapBefore = ESP.getFreeHeap();
+  uint32_t heapSize = ESP.getHeapSize();
+  uint32_t minFree = ESP.getMinFreeHeap();
+  Serial.printf("  Memory before extraction: Free=%u, Total=%u, MinFree=%u\n", heapBefore, heapSize, minFree);
+
   err = epub_extract_streaming(reader_, fileIndex, extract_to_file_callback, nullptr, 4096);
+
+  // Log memory state after extraction and show delta
+  uint32_t heapAfter = ESP.getFreeHeap();
+  int32_t heapDelta = (int32_t)heapAfter - (int32_t)heapBefore;
+  Serial.printf("  Memory after extraction:  Free=%u (delta: %d)\n", heapAfter, heapDelta);
   g_extract_file.close();
   unsigned long extractMs = millis() - t0;
   Serial.printf("  Extraction took  %lu ms\n", extractMs);
@@ -302,43 +382,6 @@ String EpubReader::getFile(const char* filename) {
   }
 
   return getExtractedPath(filename);
-}
-
-bool EpubReader::extractToMemory(const char* filename, int (*callback)(const void*, size_t, void*), void* userData) {
-  Serial.printf("\n=== Extracting %s to memory ===\n", filename);
-
-  // Open EPUB if not already open
-  if (!openEpub()) {
-    return false;
-  }
-
-  // Find the file in the EPUB
-  uint32_t fileIndex;
-  epub_error err = epub_locate_file(reader_, filename, &fileIndex);
-  if (err != EPUB_OK) {
-    Serial.printf("ERROR: File not found in EPUB: %s\n", filename);
-    return false;
-  }
-
-  // Get file info
-  epub_file_info info;
-  err = epub_get_file_info(reader_, fileIndex, &info);
-  if (err != EPUB_OK) {
-    Serial.printf("ERROR: Failed to get file info: %s\n", epub_get_error_string(err));
-    return false;
-  }
-
-  Serial.printf("Found file at index %d (size: %u bytes)\n", fileIndex, info.uncompressed_size);
-
-  // Extract using streaming API with provided callback
-  err = epub_extract_streaming(reader_, fileIndex, callback, userData, 4096);
-  if (err != EPUB_OK) {
-    Serial.printf("ERROR: Extraction failed: %s\n", epub_get_error_string(err));
-    return false;
-  }
-
-  Serial.printf("Successfully extracted %s to memory\n", filename);
-  return true;
 }
 
 epub_stream_context* EpubReader::startStreaming(const char* filename, size_t chunk_size) {
@@ -436,6 +479,12 @@ bool EpubReader::parseContainer() {
 bool EpubReader::parseContentOpf() {
   unsigned long startTime = millis();
 
+  // Memory debug: record memory before parsing
+  uint32_t heapStart = ESP.getFreeHeap();
+  uint32_t heapTotal = ESP.getHeapSize();
+  uint32_t heapMin = ESP.getMinFreeHeap();
+  Serial.printf("  [MEM] parseContentOpf start: Free=%u, Total=%u, MinFree=%u\n", heapStart, heapTotal, heapMin);
+
   // Step 1: Locate and extract content.opf
   String opfPath;
   const char* filename = contentOpfPath_.c_str();
@@ -462,50 +511,107 @@ bool EpubReader::parseContentOpf() {
     return false;
   }
 
+  // First pass: collect spine idrefs and toc id only. This avoids building a huge manifest
   unsigned long manifestStart = millis();
   String tocId = "";
-  std::vector<ManifestItem> manifest;
+  const size_t MAX_MANIFEST_ENTRIES = 100;  // Safety cap to limit RAM usage when manifest is huge
   std::vector<String> spineIdrefs;
+  const size_t MAX_SPINE_ENTRIES = 100;  // Safety cap on spine idrefs too
 
   while (parser->read()) {
     SimpleXmlParser::NodeType nodeType = parser->getNodeType();
     String name = parser->getName();
-
     if (nodeType == SimpleXmlParser::Element) {
       if (strcasecmp_helper(name, "spine")) {
         tocId = parser->getAttribute("toc");
-      } else if (strcasecmp_helper(name, "item")) {
-        ManifestItem item;
-        item.id = parser->getAttribute("id");
-        item.href = parser->getAttribute("href");
-        item.mediaType = parser->getAttribute("media-type");
-        // Only collect xhtml/html and ncx items
-        if (item.mediaType.indexOf("xhtml") >= 0 || item.mediaType.indexOf("html") >= 0 ||
-            item.mediaType.indexOf("ncx") >= 0) {
-          manifest.push_back(item);
-        }
-        if (item.mediaType.indexOf("css") >= 0) {
-          String href = parser->getAttribute("href");
-          if (!href.isEmpty()) {
-            cssFiles_.push_back(href);
-            Serial.printf("    Found CSS file: %s\n", href.c_str());
-          }
-        }
       } else if (strcasecmp_helper(name, "itemref")) {
         String idref = parser->getAttribute("idref");
         if (!idref.isEmpty()) {
-          spineIdrefs.push_back(idref);
+          if (spineIdrefs.size() >= MAX_SPINE_ENTRIES) {
+            Serial.printf("  [MEM] spineIdrefs reached cap (%u entries), skipping additional idrefs\n",
+                          (unsigned)MAX_SPINE_ENTRIES);
+          } else {
+            spineIdrefs.push_back(idref);
+          }
         }
       }
     }
   }
 
   unsigned long manifestMs = millis() - manifestStart;
-  Serial.printf("  Manifest parsing took  %lu ms\n", manifestMs);
+  Serial.printf("  Spine idref collection took  %lu ms\n", manifestMs);
+
+  // Memory debug: after manifest parsing
+  uint32_t heapAfterManifest = ESP.getFreeHeap();
+  int32_t deltaManifest = (int32_t)heapAfterManifest - (int32_t)heapStart;
+  Serial.printf("  [MEM] after manifest: Free=%u (delta: %d)\n", heapAfterManifest, deltaManifest);
 
   parser->close();
   delete parser;
 
+  // Second pass: reopen content.opf and collect only manifest entries referenced by the spine
+  // (plus CSS files and the toc entry). This limits RAM usage for large manifests.
+  std::vector<ManifestItem> manifest;
+  if (!spineIdrefs.empty() || !tocId.isEmpty()) {
+    // Re-open parser and scan manifest items. Allocate a fresh parser since the
+    // original one was closed and deleted above.
+    parser = new SimpleXmlParser();
+    if (!parser->open(opfPath.c_str())) {
+      Serial.println("ERROR: Failed to re-open content.opf for manifest parsing");
+      delete parser;
+      return false;
+    }
+
+    auto idIsNeeded = [&spineIdrefs, &tocId](const String& id) {
+      if (id == tocId)
+        return true;
+      for (const auto& s : spineIdrefs) {
+        if (s == id)
+          return true;
+      }
+      return false;
+    };
+
+    while (parser->read()) {
+      SimpleXmlParser::NodeType nodeType = parser->getNodeType();
+      String name = parser->getName();
+      if (nodeType == SimpleXmlParser::Element) {
+        if (strcasecmp_helper(name, "item")) {
+          String id = parser->getAttribute("id");
+          String href = parser->getAttribute("href");
+          String mediaType = parser->getAttribute("media-type");
+
+          // Collect CSS files regardless (we want to parse styles)
+          if (mediaType.indexOf("css") >= 0) {
+            if (!href.isEmpty()) {
+              cssFiles_.push_back(href);
+              Serial.printf("    Found CSS file: %s\n", href.c_str());
+            }
+            continue;
+          }
+
+          // Only collect items that are referenced by the spine or are the toc
+          if (!id.isEmpty() && idIsNeeded(id)) {
+            ManifestItem item;
+            item.id = id;
+            item.href = href;
+            item.mediaType = mediaType;
+            if (manifest.size() >= MAX_MANIFEST_ENTRIES) {
+              Serial.printf("  [MEM] manifest reached cap (%u entries), skipping additional items\n",
+                            (unsigned)MAX_MANIFEST_ENTRIES);
+            } else {
+              manifest.push_back(item);
+            }
+          }
+        }
+      }
+    }
+    unsigned long manifestCollectMs = millis() - manifestStart - manifestMs;
+    Serial.printf("  Manifest collection took  %lu ms\n", manifestCollectMs);
+
+    parser->close();
+    delete parser;
+  }
   // Process tocId to find tocNcxPath_
   if (!tocId.isEmpty()) {
     for (auto& item : manifest) {
@@ -519,7 +625,9 @@ bool EpubReader::parseContentOpf() {
 
   // Build spine
   spineCount_ = spineIdrefs.size();
+  Serial.printf("  [MEM] before spine allocation: Free=%u, spineCount=%d\n", ESP.getFreeHeap(), spineCount_);
   spine_ = new SpineItem[spineCount_];
+  Serial.printf("  [MEM] after spine allocation: Free=%u\n", ESP.getFreeHeap());
   for (int i = 0; i < spineCount_; i++) {
     spine_[i].idref = spineIdrefs[i];
     spine_[i].href = "";
@@ -535,8 +643,10 @@ bool EpubReader::parseContentOpf() {
   }
 
   // Calculate spine item sizes
+  Serial.printf("  [MEM] before spine size arrays: Free=%u\n", ESP.getFreeHeap());
   spineSizes_ = new size_t[spineCount_];
   spineOffsets_ = new size_t[spineCount_];
+  Serial.printf("  [MEM] after spine size arrays: Free=%u\n", ESP.getFreeHeap());
   totalBookSize_ = 0;
   if (openEpub()) {
     unsigned long spineStart = millis();
@@ -568,11 +678,98 @@ bool EpubReader::parseContentOpf() {
     closeEpub();
     unsigned long spineMs = millis() - spineStart;
     Serial.printf("  Spine size calculation took  %lu ms\n", spineMs);
+
+    // Memory debug: after spine size calculation
+    uint32_t heapAfterSpine = ESP.getFreeHeap();
+    int32_t deltaSpine = (int32_t)heapAfterSpine - (int32_t)heapStart;
+    Serial.printf("  [MEM] after spine calc: Free=%u (delta: %d)\n", heapAfterSpine, deltaSpine);
   }
 
   unsigned long endTime = millis();
   Serial.printf("  Spine parsed successfully: %d items, total size: %u bytes\n", spineCount_, totalBookSize_);
+  // Memory debug: final state for parseContentOpf
+  uint32_t heapEnd = ESP.getFreeHeap();
+  int32_t deltaTotal = (int32_t)heapEnd - (int32_t)heapStart;
+  Serial.printf("  [MEM] parseContentOpf end: Free=%u (delta: %d)\n", heapEnd, deltaTotal);
   Serial.printf("  Content.opf parsing took  %lu ms\n", endTime - startTime);
+  return true;
+}
+
+bool EpubReader::extractAll() {
+  if (!openEpub()) {
+    Serial.println("ERROR: Cannot open EPUB for full extraction");
+    return false;
+  }
+
+  uint32_t fileCount = epub_get_file_count(reader_);
+  Serial.printf("  [EXTRACT] file count: %u\n", (unsigned)fileCount);
+
+  for (uint32_t i = 0; i < fileCount; i++) {
+    epub_file_info info;
+    if (epub_get_file_info(reader_, i, &info) != EPUB_OK) {
+      continue;
+    }
+    const char* filename = info.filename;
+    if (!filename || filename[0] == '\0')
+      continue;
+    size_t len = strlen(filename);
+    // Skip directory entries (trailing slash)
+    if (len > 0 && (filename[len - 1] == '/' || filename[len - 1] == '\\'))
+      continue;
+
+    // If already extracted, skip
+    if (isFileExtracted(filename))
+      continue;
+
+    Serial.printf("    Extracting: %s (size: %llu)\n", filename, (unsigned long long)info.uncompressed_size);
+
+    String extractPath = getExtractedPath(filename);
+    int lastSlash = extractPath.lastIndexOf('/');
+    if (lastSlash < 0) {
+      lastSlash = extractPath.lastIndexOf('\\');
+    }
+    if (lastSlash > 0) {
+      String dirPath = extractPath.substring(0, lastSlash);
+      int pos = 0;
+      while (pos < dirPath.length()) {
+        int nextSlash = dirPath.indexOf('/', pos + 1);
+        if (nextSlash == -1)
+          nextSlash = dirPath.length();
+        String subDir = dirPath.substring(0, nextSlash);
+        if (!SD.exists(subDir.c_str())) {
+          if (!SD.mkdir(subDir.c_str())) {
+            Serial.printf("ERROR: Failed to create directory %s\n", subDir.c_str());
+            break;
+          }
+        }
+        pos = nextSlash;
+      }
+    }
+
+    // Open output file
+    g_extract_file = SD.open(extractPath.c_str(), FILE_WRITE);
+    if (!g_extract_file) {
+      Serial.printf("ERROR: Failed to open file for writing: %s\n", extractPath.c_str());
+      continue;
+    }
+
+    // Memory before extraction
+    uint32_t heapBefore = ESP.getFreeHeap();
+    epub_error err = epub_extract_streaming(reader_, i, extract_to_file_callback, nullptr, 4096);
+    uint32_t heapAfter = ESP.getFreeHeap();
+    int32_t delta = (int32_t)heapAfter - (int32_t)heapBefore;
+    Serial.printf("      Memory after extraction: Free=%u (delta: %d)\n", heapAfter, delta);
+
+    g_extract_file.close();
+
+    if (err != EPUB_OK) {
+      Serial.printf("ERROR: Extraction failed for %s: %s\n", filename, epub_get_error_string(err));
+      // Remove partial file if written
+      SD.remove(extractPath.c_str());
+      // keep going with other files
+    }
+  }
+
   return true;
 }
 

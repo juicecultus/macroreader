@@ -6,6 +6,8 @@
 
 #include <vector>
 
+// #define EPUB_DEBUG_CLEAN_CACHE
+
 EpubWordProvider::EpubWordProvider(const char* path, size_t bufSize)
     : bufSize_(bufSize), fileSize_(0), currentChapter_(0) {
   epubPath_ = String(path);
@@ -51,7 +53,11 @@ EpubWordProvider::EpubWordProvider(const char* path, size_t bufSize)
   } else {
     // EPUB file - create and keep EpubReader for chapter navigation
     isEpub_ = true;
+#if defined(EPUB_DEBUG_CLEAN_CACHE) || defined(TEST_BUILD)
+    epubReader_ = new EpubReader(path, true);
+#else
     epubReader_ = new EpubReader(path);
+#endif
     if (!epubReader_->isValid()) {
       delete epubReader_;
       epubReader_ = nullptr;
@@ -706,11 +712,24 @@ bool EpubWordProvider::convertXhtmlStreamToTxt(const char* epubFilename, String&
   // Open parser in streaming mode
   SimpleXmlParser parser;
   t0 = millis();
+  // Memory debug: before opening parser from stream
+  uint32_t heapBeforeParserOpen = ESP.getFreeHeap();
+  Serial.printf("  [MEM] before parser.openFromStream: Free=%u, Total=%u, MinFree=%u\n", heapBeforeParserOpen,
+                ESP.getHeapSize(), ESP.getMinFreeHeap());
+
   if (!parser.openFromStream(parser_stream_callback, &streamCtx)) {
+    // Log memory on failure
+    uint32_t heapFail = ESP.getFreeHeap();
+    int32_t failDelta = (int32_t)heapFail - (int32_t)heapBeforeParserOpen;
+    Serial.printf("  [MEM] parser.openFromStream FAILED: Free=%u (delta: %d)\n", heapFail, failDelta);
     epub_end_streaming(epubStream);
     Serial.println("ERROR: Failed to open parser in streaming mode");
     return false;
   }
+  // Memory debug: after successful parser open
+  uint32_t heapAfterParserOpen = ESP.getFreeHeap();
+  int32_t parserOpenDelta = (int32_t)heapAfterParserOpen - (int32_t)heapBeforeParserOpen;
+  Serial.printf("  [MEM] after parser.openFromStream: Free=%u (delta: %d)\n", heapAfterParserOpen, parserOpenDelta);
   unsigned long parserOpenMs = millis() - t0;
   if (timings)
     timings->parserOpen = parserOpenMs;

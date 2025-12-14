@@ -34,7 +34,7 @@ struct TocItem {
  */
 class EpubReader {
  public:
-  EpubReader(const char* epubPath);
+  EpubReader(const char* epubPath, bool cleanCacheOnStart = false);
   ~EpubReader();
 
   bool isValid() const {
@@ -71,12 +71,6 @@ class EpubReader {
    * Returns empty string if file not found or extraction failed
    */
   String getFile(const char* filename);
-
-  /**
-   * Extract a file from EPUB to memory using callback
-   * Returns true if successful
-   */
-  bool extractToMemory(const char* filename, int (*callback)(const void*, size_t, void*), void* userData);
 
   /**
    * Start pull-based streaming extraction of a file
@@ -151,6 +145,8 @@ class EpubReader {
   bool parseContentOpf();
   bool parseTocNcx();
   bool parseCssFiles();
+  bool cleanExtractDir();
+  bool extractAll();
 
   struct ManifestItem {
     String id;
@@ -176,6 +172,7 @@ class EpubReader {
 
   CssParser* cssParser_ = nullptr;
   std::vector<String> cssFiles_;  // List of CSS file paths (relative to content.opf)
+  bool cleanCacheOnStart_ = false;
 };
 
 #endif

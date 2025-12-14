@@ -136,8 +136,9 @@ struct epub_stream_context {
   size_t dict_avail;    /* Bytes available in dictionary for reading */
 
   tinfl_status status;
-  int done;  /* 1 if decompression complete */
-  int error; /* 1 if error occurred */
+  int done;                      /* 1 if decompression complete */
+  int error;                     /* 1 if error occurred */
+  int uses_shared_decomp_buffer; /* 1 if memory_block points to global g_decomp_buffer */
 };
 
 /* Find end of central directory record */
@@ -172,6 +173,16 @@ static epub_error read_central_directory(epub_reader* reader, zip_end_central_di
   if (!reader->files) {
     return EPUB_ERROR_OUT_OF_MEMORY;
   }
+#ifdef USE_ARDUINO_FILE
+  {
+    char msg[128];
+    snprintf(msg, sizeof(msg), "  [MEM] read_central_directory: allocated files[%u], Free=%d",
+             (unsigned)reader->file_count, arduino_get_free_heap());
+    arduino_log_memory(msg);
+  }
+#else
+  printf("  [MEM] read_central_directory: allocated files[%u]\n", (unsigned)reader->file_count);
+#endif
 
   /* Seek to central directory */
 #ifdef USE_ARDUINO_FILE
@@ -181,6 +192,8 @@ static epub_error read_central_directory(epub_reader* reader, zip_end_central_di
 #endif
 
   /* Read each entry */
+  const unsigned LOG_INTERVAL = 50;
+  size_t last_logged_free = 0;
   for (uint32_t i = 0; i < reader->file_count; i++) {
     zip_central_dir_entry entry;
 #ifdef USE_ARDUINO_FILE
@@ -201,6 +214,25 @@ static epub_error read_central_directory(epub_reader* reader, zip_end_central_di
     if (!filename) {
       return EPUB_ERROR_OUT_OF_MEMORY;
     }
+#ifdef USE_ARDUINO_FILE
+    {
+      int freeNow = arduino_get_free_heap();
+      if ((i % LOG_INTERVAL) == 0 || last_logged_free == 0 ||
+          (last_logged_free > freeNow && (last_logged_free - freeNow) > 4096)) {
+        char msg[128];
+        snprintf(msg, sizeof(msg),
+                 "  [MEM] read_central_directory: allocated filename buffer %u bytes for entry %u, Free=%d\n",
+                 (unsigned)(entry.filename_len + 1), (unsigned)i, freeNow);
+        arduino_log_memory(msg);
+        last_logged_free = freeNow;
+      }
+    }
+#else
+    if ((i % LOG_INTERVAL) == 0) {
+      printf("  [MEM] read_central_directory: allocated filename buffer %u bytes for entry %u\n",
+             (unsigned)(entry.filename_len + 1), (unsigned)i);
+    }
+#endif
 
 #ifdef USE_ARDUINO_FILE
     if (file_read_impl(filename, 1, entry.filename_len, reader->file_handle) != entry.filename_len)
@@ -397,6 +429,16 @@ epub_error epub_extract_streaming(epub_reader* reader, uint32_t file_index, epub
     if (!buffer) {
       return EPUB_ERROR_OUT_OF_MEMORY;
     }
+#ifdef USE_ARDUINO_FILE
+    {
+      char msg[128];
+      snprintf(msg, sizeof(msg), "  [MEM] epub_extract_streaming: allocated input buffer %u bytes, Free=%d\n",
+               (unsigned)chunk_size, arduino_get_free_heap());
+      arduino_log_memory(msg);
+    }
+#else
+    printf("  [MEM] epub_extract_streaming: allocated input buffer %u bytes\n", (unsigned)chunk_size);
+#endif
 
     size_t remaining = entry->uncompressed_size;
     while (remaining > 0) {
@@ -419,7 +461,18 @@ epub_error epub_extract_streaming(epub_reader* reader, uint32_t file_index, epub
     return EPUB_OK;
   } else if (entry->compression == 8) {
     /* DEFLATE compression - use tinfl with dictionary */
+#ifdef USE_ARDUINO_FILE
     size_t total_size = sizeof(tinfl_decompressor) + chunk_size + TINFL_LZ_DICT_SIZE;
+    {
+      char msg[128];
+      snprintf(msg, sizeof(msg), "  [MEM] epub_start_streaming: attempting alloc total_size=%u\n",
+               (unsigned)total_size);
+      arduino_log_memory(msg);
+    }
+#else
+    size_t total_size = sizeof(tinfl_decompressor) + chunk_size + TINFL_LZ_DICT_SIZE;
+    printf("  [MEM] epub_start_streaming: attempting alloc total_size=%u\n", (unsigned)total_size);
+#endif
     uint8_t* memory_block = NULL;
 
 #ifdef USE_ARDUINO_FILE
@@ -449,6 +502,16 @@ epub_error epub_extract_streaming(epub_reader* reader, uint32_t file_index, epub
     if (!memory_block) {
       return EPUB_ERROR_OUT_OF_MEMORY;
     }
+#ifdef USE_ARDUINO_FILE
+    {
+      char msg[128];
+      snprintf(msg, sizeof(msg), "  [MEM] epub_extract_streaming: allocated memory_block total_size=%u, Free=%d\n",
+               (unsigned)total_size, arduino_get_free_heap());
+      arduino_log_memory(msg);
+    }
+#else
+    printf("  [MEM] epub_extract_streaming: allocated memory_block total_size=%u\n", (unsigned)total_size);
+#endif
 #endif
 
     /* Partition the block */
@@ -544,6 +607,16 @@ epub_stream_context* epub_start_streaming(epub_reader* reader, uint32_t file_ind
   if (!ctx) {
     return NULL;
   }
+#ifdef USE_ARDUINO_FILE
+  {
+    char msg[128];
+    snprintf(msg, sizeof(msg), "  [MEM] epub_start_streaming: allocated ctx (%u bytes), Free=%d\n",
+             (unsigned)sizeof(epub_stream_context), arduino_get_free_heap());
+    arduino_log_memory(msg);
+  }
+#else
+  printf("  [MEM] epub_start_streaming: allocated ctx (%u bytes)\n", (unsigned)sizeof(epub_stream_context));
+#endif
 
   ctx->reader = reader;
   ctx->entry = entry;
@@ -591,11 +664,47 @@ epub_stream_context* epub_start_streaming(epub_reader* reader, uint32_t file_ind
   if (entry->compression == 8) {
     /* DEFLATE - allocate decompression buffers */
     size_t total_size = sizeof(tinfl_decompressor) + chunk_size + TINFL_LZ_DICT_SIZE;
+#ifdef USE_ARDUINO_FILE
+    /* Reuse global buffer if available to reduce fragmentation and memory usage */
+    if (g_decomp_buffer && g_decomp_buffer_size >= total_size) {
+      ctx->memory_block = g_decomp_buffer;
+      ctx->uses_shared_decomp_buffer = 1;
+    } else {
+      /* Free old buffer if exists */
+      if (g_decomp_buffer) {
+        free(g_decomp_buffer);
+        g_decomp_buffer = NULL;
+        g_decomp_buffer_size = 0;
+      }
+
+      ctx->memory_block = (uint8_t*)malloc(total_size);
+      if (!ctx->memory_block) {
+        free(ctx);
+        return NULL;
+      }
+#ifdef USE_ARDUINO_FILE
+      {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "  [MEM] epub_start_streaming: allocated decomp buffer total_size=%u, Free=%d\n",
+                 (unsigned)total_size, arduino_get_free_heap());
+        arduino_log_memory(msg);
+      }
+#else
+      printf("  [MEM] epub_start_streaming: allocated decomp buffer total_size=%u\n", (unsigned)total_size);
+#endif
+      /* Keep as global for future reuse */
+      g_decomp_buffer = ctx->memory_block;
+      g_decomp_buffer_size = total_size;
+      ctx->uses_shared_decomp_buffer = 1;
+    }
+#else
     ctx->memory_block = (uint8_t*)malloc(total_size);
     if (!ctx->memory_block) {
       free(ctx);
       return NULL;
     }
+    ctx->uses_shared_decomp_buffer = 0;
+#endif
 
     /* Partition the block */
     ctx->inflator = (tinfl_decompressor*)ctx->memory_block;
@@ -770,7 +879,13 @@ int epub_read_chunk(epub_stream_context* ctx, void* buffer, size_t max_size) {
 void epub_end_streaming(epub_stream_context* ctx) {
   if (ctx) {
     if (ctx->memory_block) {
+#ifdef USE_ARDUINO_FILE
+      if (!ctx->uses_shared_decomp_buffer) {
+        free(ctx->memory_block);
+      }
+#else
       free(ctx->memory_block);
+#endif
     }
     free(ctx);
   }

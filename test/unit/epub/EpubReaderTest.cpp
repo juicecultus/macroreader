@@ -37,6 +37,8 @@
 #define TEST_CSS_PARSING true
 #define TEST_STREAM_CONVERTER false
 #define TEST_STREAM_RAW_BYTES false
+// Run cache-clean test
+#define TEST_CLEAN_CACHE true
 
 // Test configuration
 namespace EpubReaderTests {
@@ -232,6 +234,29 @@ void testFileExtraction(TestUtils::TestRunner& runner, EpubReader& reader) {
       }
     }
   }
+}
+
+/**
+ * Test: Clean cache on startup
+ */
+void testCleanCache(TestUtils::TestRunner& runner) {
+  std::cout << "\n=== Test: Clean Cache On Startup ===\n";
+
+  EpubReader readerA(TestGlobals::g_testFilePath);
+  String extractDir = readerA.getExtractDir();
+  std::string dummyPath = std::string(extractDir.c_str()) + "/__dummy_cache_file.txt";
+
+  // Create dummy file
+  {
+    std::ofstream out(dummyPath, std::ios::binary);
+    out << "hello";
+  }
+  runner.expectTrue(std::filesystem::exists(dummyPath), "Dummy cache file should exist");
+
+  // Create new reader with clean flag enabled
+  EpubReader readerB(TestGlobals::g_testFilePath, true);
+
+  runner.expectTrue(!std::filesystem::exists(dummyPath), "Dummy cache file should be removed by clean-on-start");
 }
 
 /**
@@ -1157,6 +1182,10 @@ int main() {
 #if TEST_CSS_PARSING
   EpubReaderTests::testCssStringParsing(runner);    // Test CSS parser directly first
   EpubReaderTests::testCssParsing(runner, reader);  // Then test with EPUB
+#endif
+
+#if TEST_CLEAN_CACHE
+  EpubReaderTests::testCleanCache(runner);
 #endif
 
 #if TEST_STREAM_CONVERTER
