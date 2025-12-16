@@ -282,6 +282,14 @@ void EpubWordProvider::writeParagraphStyleToken(String& writeBuffer, const Strin
       writeBuffer += styleToken;
     }
     paragraphClassesWritten = true;
+    // Paragraph-level CSS may also include font-weight/font-style which we
+    // treat as the base inline styling for this paragraph. Record the base
+    // inline style so later inline elements can override it.
+    baseInlineStyle_.hasBold = combined.hasFontWeight;
+    baseInlineStyle_.bold = (combined.hasFontWeight && combined.fontWeight == CssFontWeight::Bold);
+    baseInlineStyle_.hasItalic = combined.hasFontStyle;
+    baseInlineStyle_.italic = (combined.hasFontStyle && combined.fontStyle == CssFontStyle::Italic);
+    updateEffectiveInlineCombined();
   }
 }
 
@@ -387,10 +395,15 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
           }
 
           // Close any open inline styles at paragraph end to prevent carry-over between paragraphs
-          if (currentInlineCombined_ != '\0') {
-            writeStyleResetToken(buffer, currentInlineCombined_);
-            currentInlineCombined_ = '\0';
+          // Use the *written* inline combination so we close whatever was actually emitted
+          // into the output buffer instead of the abstract current state.
+          if (writtenInlineCombined_ != '\0') {
+            writeStyleResetToken(buffer, writtenInlineCombined_);
+            writtenInlineCombined_ = '\0';
           }
+          // Reset base style and inline stack at paragraph end
+          baseInlineStyle_ = InlineStyleState();
+          currentInlineCombined_ = '\0';
           inlineStyleStack_.clear();
 
           buffer += "\n";
@@ -444,6 +457,9 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
       writeParagraphStyleToken(buffer, pendingParagraphClasses, pendingInlineStyle, paragraphClassesWritten,
                                paragraphStyleEmitted);
 
+      // Ensure inline style tokens (open/close) are emitted right before we write visible text
+      ensureInlineStyleEmitted(buffer);
+
       // Append text
       buffer += text;
       lineHasContent = true;
@@ -478,11 +494,14 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
     paragraphStyleEmitted.clear();
   }
 
-  // Close any remaining inline styles
-  if (currentInlineCombined_ != '\0') {
-    writeStyleResetToken(buffer, currentInlineCombined_);
-    currentInlineCombined_ = '\0';
+  // Close any remaining inline styles (close what was actually emitted)
+  if (writtenInlineCombined_ != '\0') {
+    writeStyleResetToken(buffer, writtenInlineCombined_);
+    writtenInlineCombined_ = '\0';
   }
+  // Reset base and stack state
+  baseInlineStyle_ = InlineStyleState();
+  currentInlineCombined_ = '\0';
   inlineStyleStack_.clear();
 
   // Periodic flush and final flush using write() to verify bytes written
@@ -614,11 +633,13 @@ char EpubWordProvider::writeInlineStyleToken(String& writeBuffer, const String& 
                                              const String& styleAttr) {
   // Determine style flags for this element (from tag name, classes, inline styles)
   InlineStyleState state;
-  // Tag name
+  // Tag name - these are explicit declarations
   if (elementName == "b" || elementName == "strong") {
     state.bold = true;
+    state.hasBold = true;
   } else if (elementName == "i" || elementName == "em") {
     state.italic = true;
+    state.hasItalic = true;
   }
 
   // Check CSS classes and inline styles for additional styling
@@ -632,80 +653,34 @@ char EpubWordProvider::writeInlineStyleToken(String& writeBuffer, const String& 
       CssStyle inlineStyle = css->parseInlineStyle(styleAttr);
       combined.merge(inlineStyle);
     }
-    if (combined.hasFontWeight && combined.fontWeight == CssFontWeight::Bold) {
-      state.bold = true;
+    if (combined.hasFontWeight) {
+      state.hasBold = true;
+      state.bold = (combined.fontWeight == CssFontWeight::Bold);
     }
-    if (combined.hasFontStyle && combined.fontStyle == CssFontStyle::Italic) {
-      state.italic = true;
+    if (combined.hasFontStyle) {
+      state.hasItalic = true;
+      state.italic = (combined.fontStyle == CssFontStyle::Italic);
     }
   }
 
   // Push this element's style onto the stack
   inlineStyleStack_.push_back(state);
 
-  // Compute new combined style across the stack
-  bool anyBold = false;
-  bool anyItalic = false;
-  for (const auto& s : inlineStyleStack_) {
-    anyBold = anyBold || s.bold;
-    anyItalic = anyItalic || s.italic;
-  }
+  // Recompute the effective combined style including the paragraph base style
+  updateEffectiveInlineCombined();
 
-  char newCombined = '\0';
-  if (anyBold && anyItalic)
-    newCombined = 'X';
-  else if (anyBold)
-    newCombined = 'B';
-  else if (anyItalic)
-    newCombined = 'I';
-
-  // If the effective combined style changed, transition tokens
-  if (newCombined != currentInlineCombined_) {
-    if (currentInlineCombined_ != '\0') {
-      writeStyleResetToken(writeBuffer, currentInlineCombined_);
-    }
-    if (newCombined != '\0') {
-      writeBuffer += (char)0x1B;
-      writeBuffer += newCombined;
-    }
-    currentInlineCombined_ = newCombined;
-  }
-
-  return newCombined;
+  return currentInlineCombined_;
 }
 
 void EpubWordProvider::closeInlineStyleElement(String& writeBuffer) {
   if (inlineStyleStack_.empty())
     return;
 
-  // Pop the last element and recompute combined style
+  // Pop the last element and recompute the effective combined style which
+  // takes paragraph base and any explicit overrides in the stack into account.
   inlineStyleStack_.pop_back();
 
-  bool anyBold = false;
-  bool anyItalic = false;
-  for (const auto& s : inlineStyleStack_) {
-    anyBold = anyBold || s.bold;
-    anyItalic = anyItalic || s.italic;
-  }
-
-  char newCombined = '\0';
-  if (anyBold && anyItalic)
-    newCombined = 'X';
-  else if (anyBold)
-    newCombined = 'B';
-  else if (anyItalic)
-    newCombined = 'I';
-
-  if (newCombined != currentInlineCombined_) {
-    if (currentInlineCombined_ != '\0') {
-      writeStyleResetToken(writeBuffer, currentInlineCombined_);
-    }
-    if (newCombined != '\0') {
-      writeBuffer += (char)0x1B;
-      writeBuffer += newCombined;
-    }
-    currentInlineCombined_ = newCombined;
-  }
+  updateEffectiveInlineCombined();
 }
 
 void EpubWordProvider::writeStyleResetToken(String& writeBuffer, char startCmd) {
@@ -719,6 +694,59 @@ void EpubWordProvider::writeStyleResetToken(String& writeBuffer, char startCmd) 
   }
   writeBuffer += (char)0x1B;  // ESC
   writeBuffer += endCmd;      // Reset token corresponding to startCmd
+}
+
+void EpubWordProvider::ensureInlineStyleEmitted(String& writeBuffer) {
+  // If the written style already matches current, nothing to do
+  if (writtenInlineCombined_ == currentInlineCombined_)
+    return;
+
+  // Close whatever was previously emitted
+  if (writtenInlineCombined_ != '\0') {
+    writeStyleResetToken(writeBuffer, writtenInlineCombined_);
+  }
+
+  // Open new combined style if any
+  if (currentInlineCombined_ != '\0') {
+    writeBuffer += (char)0x1B;
+    writeBuffer += currentInlineCombined_;
+  }
+
+  // Update the written-tracking state
+  writtenInlineCombined_ = currentInlineCombined_;
+}
+
+void EpubWordProvider::updateEffectiveInlineCombined() {
+  // Start with base style if specified; otherwise defaults to not-set (false)
+  bool effectiveBold = false;
+  bool effectiveItalic = false;
+  if (baseInlineStyle_.hasBold) {
+    effectiveBold = baseInlineStyle_.bold;
+  }
+  if (baseInlineStyle_.hasItalic) {
+    effectiveItalic = baseInlineStyle_.italic;
+  }
+
+  // Apply stack entries in order: any entry that explicitly specifies a property
+  // overrides the current effective value for that property.
+  for (const auto& s : inlineStyleStack_) {
+    if (s.hasBold) {
+      effectiveBold = s.bold;
+    }
+    if (s.hasItalic) {
+      effectiveItalic = s.italic;
+    }
+  }
+
+  char newCombined = '\0';
+  if (effectiveBold && effectiveItalic)
+    newCombined = 'X';
+  else if (effectiveBold)
+    newCombined = 'B';
+  else if (effectiveItalic)
+    newCombined = 'I';
+
+  currentInlineCombined_ = newCombined;
 }
 
 // Context for true streaming: EPUB -> Parser -> TXT

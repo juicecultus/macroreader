@@ -312,6 +312,81 @@ int main() {
 
   testConversion(runner);
   testInlineStyleStacking(runner);
+  // New test: CSS base inline styles and inline overrides
+  auto testInlineCssBaseAndOverrides = [&](TestUtils::TestRunner& r) {
+    std::cout << "\n=== Test: Inline CSS base and overrides ===\n";
+    const char* cssHtmlPath = "C:/Users/Patrick/Desktop/microreader/resources/books/inline_css_test.html";
+
+    std::string html =
+        "<html><head><title>CSS Base</title><style>\n"
+        ".bold { font-weight: bold; }\n"
+        ".italic { font-style: italic; }\n"
+        ".bolditalic { font-weight: bold; font-style: italic; }\n"
+        "</style></head><body>"
+        "<p class=\"bold\">CssBold</p>"
+        "<p class=\"bold\"><i>BaseAndInnerItalic</i></p>"
+        "<p class=\"bold\">Outer <span style=\"font-weight: normal;\">InnerNormal</span> Outer</p>"
+        "</body></html>";
+
+    // Write file
+    {
+      std::ofstream out(cssHtmlPath);
+      if (!out.is_open()) {
+        std::cout << "ERROR: Failed to write test HTML: " << cssHtmlPath << "\n";
+        r.expectTrue(false, "Should be able to write test HTML");
+        return;
+      }
+      out << html;
+    }
+
+    EpubWordProvider provider(cssHtmlPath);
+    r.expectTrue(provider.isValid(), "Provider should be valid for CSS base test");
+
+    std::string expectedTxtPath = cssHtmlPath;
+    size_t dotPos = expectedTxtPath.rfind('.');
+    if (dotPos != std::string::npos) {
+      expectedTxtPath = expectedTxtPath.substr(0, dotPos) + ".txt";
+    }
+    std::string output = readFileContents(expectedTxtPath);
+    r.expectTrue(!output.empty(), "Output should not be empty for CSS base test");
+
+    auto checkWrappedUpperLower = [&](const std::string& word, char open, char close) {
+      size_t pos = output.find(word);
+      if (pos == std::string::npos) {
+        std::cout << "ERROR: Word not found: " << word << "\n";
+        return false;
+      }
+      bool okBefore = false;
+      if (pos >= 2 && output[pos - 2] == (char)0x1B && output[pos - 1] == open)
+        okBefore = true;
+      bool okAfter = false;
+      size_t afterPos = pos + word.length();
+      if (afterPos + 1 < output.length() && output[afterPos] == (char)0x1B && output[afterPos + 1] == close)
+        okAfter = true;
+      r.expectTrue(okBefore && okAfter, std::string("Word '") + word + " should be wrapped with expected tokens");
+      return okBefore && okAfter;
+    };
+
+    // CssBold -> expect B/b
+    checkWrappedUpperLower("CssBold", 'B', 'b');
+
+    // BaseAndInnerItalic -> paragraph base bold + inner <i> should produce X/x
+    checkWrappedUpperLower("BaseAndInnerItalic", 'X', 'x');
+
+    // InnerNormal -> should be un-bolded inside span: before Inner should be ESC+b (reset) and after Inner should be
+    // ESC+B (reopen)
+    size_t posInner = output.find("InnerNormal");
+    if (posInner != std::string::npos) {
+      bool beforeReset = (posInner >= 2 && output[posInner - 2] == (char)0x1B && output[posInner - 1] == 'b');
+      size_t afterInner = posInner + std::string("InnerNormal").length();
+      bool afterReopen =
+          (afterInner + 1 < output.length() && output[afterInner] == (char)0x1B && output[afterInner + 1] == 'B');
+      r.expectTrue(beforeReset && afterReopen, "InnerNormal should be un-bolded then restore bold after span");
+    } else {
+      r.expectTrue(false, "InnerNormal not found");
+    }
+  };
+  testInlineCssBaseAndOverrides(runner);
 
   std::cout << "\n========================================\n";
   runner.printSummary();

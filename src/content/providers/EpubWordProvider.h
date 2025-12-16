@@ -121,14 +121,35 @@ class EpubWordProvider : public WordProvider {
 
   // Track active inline style stack for correct combined styling (bold+italic = 'X')
   struct InlineStyleState {
+    // Value and whether it was explicitly specified for this element.
+    // If hasBold/hasItalic is true, the corresponding value should override
+    // any previously-set base or ancestor inline styles.
     bool bold = false;
     bool italic = false;
+    bool hasBold = false;
+    bool hasItalic = false;
   };
   std::vector<InlineStyleState> inlineStyleStack_;
   char currentInlineCombined_ = '\0';
+  // The currently-written inline style combination (what's been emitted to the buffer).
+  // This is kept separate from `currentInlineCombined_` (the effective style) so we
+  // can delay emitting style tokens until the moment actual text is written.
+  char writtenInlineCombined_ = '\0';
+  // Base inline style (from paragraph-level CSS classes / inline style)
+  InlineStyleState baseInlineStyle_;
+
+  // Recompute the effective combined style char (`currentInlineCombined_`) from
+  // the paragraph base style and the inline style stack (stack entries can
+  // explicitly override base and ancestor values if they specify the property).
+  void updateEffectiveInlineCombined();
 
   // Emit style reset token (to return to normal after inline style element closes)
   void writeStyleResetToken(String& writeBuffer, char startCmd);
+
+  // Ensure that the currently-emitted inline style in the output buffer matches
+  // the effective inline style state (`currentInlineCombined_`). This will emit
+  // the necessary reset/open tokens just before writing visible text.
+  void ensureInlineStyleEmitted(String& writeBuffer);
 
   // Helper to create directories recursively for a given path
   bool createDirRecursive(const String& path);
