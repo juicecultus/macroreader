@@ -394,6 +394,12 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
               buffer += (char)0x1B;
               buffer += endCmd;
             }
+            paragraphStyleEmitted.clear();
+          }
+          // Close any open inline styles before newline
+          if (writtenInlineCombined_ != '\0') {
+            writeStyleResetToken(buffer, writtenInlineCombined_);
+            writtenInlineCombined_ = '\0';
           }
           buffer += "\n";
           lineHasContent = false;
@@ -430,20 +436,16 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
             paragraphStyleEmitted.clear();
           }
 
-          // Close any open inline styles at paragraph end to prevent carry-over between paragraphs
-          // Use the *written* inline combination so we close whatever was actually emitted
-          // into the output buffer instead of the abstract current state.
-          if (writtenInlineCombined_ != '\0') {
-            writeStyleResetToken(buffer, writtenInlineCombined_);
-            writtenInlineCombined_ = '\0';
-          }
-          // Reset base style and inline stack at paragraph end
-          baseInlineStyle_ = InlineStyleState();
-          currentInlineCombined_ = '\0';
-          inlineStyleStack_.clear();
-
           buffer += "\n";
         }
+        // Close any open inline styles at paragraph end to prevent carry-over between paragraphs
+        // Use the *written* inline combination so we close whatever was actually emitted
+        // into the output buffer instead of the abstract current state.
+        if (writtenInlineCombined_ != '\0') {
+          writeStyleResetToken(buffer, writtenInlineCombined_);
+          writtenInlineCombined_ = '\0';
+        }
+
         lineHasContent = false;
         lineHasNbsp = false;
         pendingParagraphClasses = "";
