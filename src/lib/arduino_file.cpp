@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <SD.h>
 
 extern "C" {
@@ -11,6 +12,18 @@ void* arduino_file_open(const char* path) {
   }
   return f;
 }
+
+extern "C" {
+int arduino_get_free_heap(void) {
+  return (int)ESP.getFreeHeap();
+}
+
+void arduino_log_memory(const char* msg) {
+  if (msg) {
+    Serial.println(msg);
+  }
+}
+}  // extern "C"
 
 void arduino_file_close(void* handle) {
   if (!handle)

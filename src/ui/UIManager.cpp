@@ -2,6 +2,7 @@
 
 #include <resources/fonts/FontManager.h>
 
+#include "core/Settings.h"
 #include "resources/images/bebop_image.h"
 #include "ui/screens/FileBrowserScreen.h"
 #include "ui/screens/ImageViewerScreen.h"
@@ -9,6 +10,8 @@
 
 UIManager::UIManager(EInkDisplay& display, SDCardManager& sdManager)
     : display(display), sdManager(sdManager), textRenderer(display) {
+  // Initialize consolidated settings manager
+  settings = new Settings(sdManager);
   // Create concrete screens and store pointers in the map.
   screens[ScreenId::FileBrowser] =
       std::unique_ptr<Screen>(new FileBrowserScreen(display, textRenderer, sdManager, *this));
@@ -18,25 +21,32 @@ UIManager::UIManager(EInkDisplay& display, SDCardManager& sdManager)
   Serial.printf("[%lu] UIManager: Constructor called\n", millis());
 }
 
+UIManager::~UIManager() {
+  if (settings)
+    delete settings;
+}
+
 void UIManager::begin() {
   Serial.printf("[%lu] UIManager: begin() called\n", millis());
+  // Load consolidated settings (import legacy files on first run)
+  if (sdManager.ready()) {
+    if (settings)
+      settings->load();
+  }
   // Initialize screens using generic Screen interface
   for (auto& p : screens) {
     if (p.second)
       p.second->begin();
   }
 
-  // Try to restore last-visible screen from SD if available. Fall back to
-  // FileBrowser when no saved state exists or on error.
+  // Restore last-visible screen (use consolidated settings when available)
   currentScreen = ScreenId::FileBrowser;
-  if (sdManager.ready()) {
-    char buf[16];
-    size_t r = sdManager.readFileToBuffer("/microreader/ui_state.txt", buf, sizeof(buf));
-    if (r > 0) {
-      int saved = atoi(buf);
+  if (sdManager.ready() && settings) {
+    int saved = 0;
+    if (settings->getInt(String("ui.screen"), saved)) {
       if (saved >= 0 && saved <= static_cast<int>(ScreenId::TextViewer)) {
         currentScreen = static_cast<ScreenId>(saved);
-        Serial.printf("[%lu] UIManager: Restored screen %d from SD\n", millis(), saved);
+        Serial.printf("[%lu] UIManager: Restored screen %d from settings\n", millis(), saved);
       } else {
         Serial.printf("[%lu] UIManager: Invalid saved screen %d; using default\n", millis(), saved);
       }
@@ -94,10 +104,10 @@ void UIManager::prepareForSleep() {
   if (screens[currentScreen])
     screens[currentScreen]->shutdown();
   // Persist which screen was active so we can restore it on next boot.
-  if (sdManager.ready()) {
-    String content = String(static_cast<int>(currentScreen));
-    if (!sdManager.writeFile("/microreader/ui_state.txt", content)) {
-      Serial.println("UIManager: Failed to write ui_state.txt to SD");
+  if (sdManager.ready() && settings) {
+    settings->setInt(String("ui.screen"), static_cast<int>(currentScreen));
+    if (!settings->save()) {
+      Serial.println("UIManager: Failed to write settings.cfg to SD");
     }
   } else {
     Serial.println("UIManager: SD not ready; skipping save of current screen");

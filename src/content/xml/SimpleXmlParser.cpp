@@ -28,6 +28,12 @@ SimpleXmlParser::SimpleXmlParser()
       elementEndPos_(0) {
   // Allocate primary buffer on heap to avoid stack overflow on ESP32
   buffer_ = (uint8_t*)malloc(BUFFER_SIZE);
+  if (buffer_) {
+    Serial.printf("  [MEM] SimpleXmlParser ctor: allocated primary buffer %d bytes, Free=%u\n", BUFFER_SIZE,
+                  ESP.getFreeHeap());
+  } else {
+    Serial.printf("  [MEM] SimpleXmlParser ctor: FAILED to allocate primary buffer, Free=%u\n", ESP.getFreeHeap());
+  }
 
   // Initialize streaming buffers to null
   for (size_t i = 0; i < NUM_STREAM_BUFFERS; i++) {
@@ -118,15 +124,19 @@ bool SimpleXmlParser::openFromStream(StreamCallback callback, void* userData) {
 
   // Allocate sliding window buffers
   for (size_t i = 0; i < NUM_STREAM_BUFFERS; i++) {
+    Serial.printf("  [MEM] attempting to alloc stream buffer %d of %d, Free=%u\n", (int)i + 1, (int)NUM_STREAM_BUFFERS,
+                  ESP.getFreeHeap());
     streamBuffers_[i] = (uint8_t*)malloc(BUFFER_SIZE);
     if (!streamBuffers_[i]) {
       // Allocation failed, clean up
+      Serial.printf("  [MEM] failed to alloc stream buffer %d, Free=%u\n", (int)i + 1, ESP.getFreeHeap());
       for (size_t j = 0; j < i; j++) {
         free(streamBuffers_[j]);
         streamBuffers_[j] = nullptr;
       }
       return false;
     }
+    Serial.printf("  [MEM] allocated stream buffer %d, Free=%u\n", (int)i + 1, ESP.getFreeHeap());
     streamBufferStarts_[i] = 0;
     streamBufferLengths_[i] = 0;
   }

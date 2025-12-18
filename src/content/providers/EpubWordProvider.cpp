@@ -4,7 +4,10 @@
 #include <SD.h>
 #include <ctype.h>
 
+#include <cmath>  // for std::round
 #include <vector>
+
+// #define EPUB_DEBUG_CLEAN_CACHE
 
 EpubWordProvider::EpubWordProvider(const char* path, size_t bufSize)
     : bufSize_(bufSize), fileSize_(0), currentChapter_(0) {
@@ -51,21 +54,30 @@ EpubWordProvider::EpubWordProvider(const char* path, size_t bufSize)
   } else {
     // EPUB file - create and keep EpubReader for chapter navigation
     isEpub_ = true;
+#if defined(EPUB_DEBUG_CLEAN_CACHE) || defined(TEST_BUILD)
+    epubReader_ = new EpubReader(path, true);
+#else
     epubReader_ = new EpubReader(path);
+#endif
     if (!epubReader_->isValid()) {
       delete epubReader_;
       epubReader_ = nullptr;
+      Serial.printf("ERROR: Failed to open EPUB file: %s\n", path);
       return;
     }
 
-    // Open the first chapter (index 0)
-    if (!openChapter(0)) {
-      delete epubReader_;
-      epubReader_ = nullptr;
-      return;
-    }
+    currentIndex_ = 0;
+    currentChapter_ = -1;
+
+    // // Open the first chapter (index 0)
+    // if (!openChapter(0)) {
+    //   delete epubReader_;
+    //   epubReader_ = nullptr;
+    //   return;
+    // }
 
     valid_ = true;
+    Serial.printf("Opened EPUB file: %s with %d chapters\n", path, epubReader_->getSpineCount());
   }
 }
 
@@ -121,7 +133,7 @@ bool EpubWordProvider::isInlineStyleElement(const String& name) {
   return name == "b" || name == "strong" || name == "i" || name == "em" || name == "span";
 }
 
-bool EpubWordProvider::convertXhtmlToTxt(const String& srcPath, String& outTxtPath) {
+bool EpubWordProvider::convertXhtmlToTxt(const String& srcPath, String& outTxtPath, ConversionTimings* timings) {
   if (srcPath.isEmpty())
     return false;
 
@@ -133,6 +145,28 @@ bool EpubWordProvider::convertXhtmlToTxt(const String& srcPath, String& outTxtPa
   }
   dest += ".txt";
 
+  // If the TXT file already exists and is non-empty, reuse it and skip conversion
+  if (SD.exists(dest.c_str())) {
+    File chk = SD.open(dest.c_str());
+    if (chk) {
+      size_t sz = chk.size();
+      chk.close();
+      if (sz > 0) {
+        if (timings) {
+          timings->total = 0;
+          timings->parserOpen = 0;
+          timings->outOpen = 0;
+          timings->conversion = 0;
+          timings->parserClose = 0;
+          timings->closeOut = 0;
+          timings->bytes = sz;
+        }
+        Serial.printf("  Reusing existing TXT: %s  —  %u bytes\n", dest.c_str(), (unsigned)sz);
+        outTxtPath = dest;
+        return true;
+      }
+    }
+  }
   // Create directories if needed
   int lastSlash = dest.lastIndexOf('/');
   if (lastSlash > 0) {
@@ -142,21 +176,54 @@ bool EpubWordProvider::convertXhtmlToTxt(const String& srcPath, String& outTxtPa
 
   // Open input and output files
   SimpleXmlParser parser;
+  unsigned long totalStartMs = millis();
+  unsigned long t0 = millis();
   if (!parser.open(srcPath.c_str()))
     return false;
+  unsigned long parserOpenMs = millis() - t0;
+  if (timings)
+    timings->parserOpen = parserOpenMs;
 
+  t0 = millis();
   File out = SD.open(dest.c_str(), FILE_WRITE);
+  unsigned long outOpenMs = millis() - t0;
   if (!out) {
     parser.close();
     return false;
   }
+  Serial.printf("  Output file open took  %lu ms\n", outOpenMs);
+  if (timings)
+    timings->outOpen = outOpenMs;
 
   // Perform the conversion using common logic
-  performXhtmlToTxtConversion(parser, out);
+  t0 = millis();
+  size_t bytesWritten = 0;
+  performXhtmlToTxtConversion(parser, out, &bytesWritten);
+  unsigned long conversionMs = millis() - t0;
+  if (timings)
+    timings->conversion = conversionMs;
 
-  // Cleanup and close
+  // Cleanup and close (timed)
+  t0 = millis();
   parser.close();
+  unsigned long parserCloseMs = millis() - t0;
+  if (timings)
+    timings->parserClose = parserCloseMs;
+  t0 = millis();
   out.close();
+  unsigned long closeOutMs = millis() - t0;
+  if (timings)
+    timings->closeOut = closeOutMs;
+  unsigned long totalMs = millis() - totalStartMs;
+  if (timings) {
+    timings->total = totalMs;
+    timings->bytes = (unsigned int)bytesWritten;
+  }
+  Serial.printf(
+      "Converted XHTML to TXT: %s  —  total = %lu ms  ( parserOpen = %lu, outOpen = %lu, conversion = %lu, parserClose "
+      "= %lu, "
+      "closeOut = %lu )\n",
+      dest.c_str(), totalMs, parserOpenMs, outOpenMs, conversionMs, parserCloseMs, closeOutMs);
   outTxtPath = dest;
   return true;
 }
@@ -216,16 +283,45 @@ void EpubWordProvider::writeParagraphStyleToken(String& writeBuffer, const Strin
       writeBuffer += styleToken;
     }
     paragraphClassesWritten = true;
+
+    // If the combined paragraph style specifies a positive text-indent value,
+    // convert it to a number of spaces using a simple heuristic: spaces = round(px / 4),
+    // clamped to [0, 12]. This maps typical indents to visible space counts while
+    // avoiding huge or tiny counts.
+    if (combined.hasTextIndent && combined.textIndent > 0.0f) {
+      int spaces = (int)std::round(combined.textIndent / 4.0f);
+      if (spaces < 0)
+        spaces = 0;
+      if (spaces > 12)
+        spaces = 12;
+
+      writeBuffer += (char)0x1B;  // ESC
+      writeBuffer += 'H';
+      for (int i = 0; i < spaces; ++i)
+        writeBuffer += '-';
+      writeBuffer += (char)0x1B;  // ESC
+      writeBuffer += 'h';
+    }
+
+    // Paragraph-level CSS may also include font-weight/font-style which we
+    // treat as the base inline styling for this paragraph. Record the base
+    // inline style so later inline elements can override it.
+    baseInlineStyle_.hasBold = combined.hasFontWeight;
+    baseInlineStyle_.bold = (combined.hasFontWeight && combined.fontWeight == CssFontWeight::Bold);
+    baseInlineStyle_.hasItalic = combined.hasFontStyle;
+    baseInlineStyle_.italic = (combined.hasFontStyle && combined.fontStyle == CssFontStyle::Italic);
+    updateEffectiveInlineCombined();
   }
 }
 
-void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File& out) {
+void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File& out, size_t* outBytes) {
   const size_t FLUSH_THRESHOLD = 2048;
+  if (outBytes)
+    *outBytes = 0;
 
   String buffer;                     // Output buffer
   std::vector<String> elementStack;  // Track nested elements
-  std::vector<char>
-      inlineStyleEmitted;  // Track which inline style elements emitted tokens (store uppercase start char or '\0')
+  // Track inline style element stack (store per-element flags in object state)
   std::vector<char> paragraphStyleEmitted;  // Track paragraph style tokens emitted (uppercase)
   String pendingParagraphClasses;           // CSS classes for current block
   String pendingInlineStyle;                // Inline style attribute for current block
@@ -260,12 +356,13 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
         paragraphClassesWritten = false;
       }
 
-      // Handle inline style elements (b, strong, i, em, span) - just track them, don't emit yet
+      // Handle inline style elements (b, strong, i, em, span)
       if (isInlineStyleElement(name) && !parser.isEmptyElement()) {
         String classAttr = parser.getAttribute("class");
         String styleAttr = parser.getAttribute("style");
-        char emitted = writeInlineStyleToken(buffer, name, classAttr, styleAttr);
-        inlineStyleEmitted.push_back(emitted);
+        // writeInlineStyleToken will push state into inlineStyleStack_ and
+        // emit a combined token if necessary (supports bold+italic stacking)
+        (void)writeInlineStyleToken(buffer, name, classAttr, styleAttr);
       }
 
       // Handle <br/> - only add newline if line has content
@@ -297,12 +394,8 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
       String name = parser.getName();
 
       // Handle end of inline style elements
-      if (isInlineStyleElement(name) && !inlineStyleEmitted.empty()) {
-        char emitted = inlineStyleEmitted.back();
-        inlineStyleEmitted.pop_back();
-        if (emitted != '\0') {
-          writeStyleResetToken(buffer, emitted);
-        }
+      if (isInlineStyleElement(name) && !inlineStyleStack_.empty()) {
+        closeInlineStyleElement(buffer);
       }
 
       // Block elements: add newline if line had content OR had &nbsp;
@@ -323,18 +416,16 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
           }
 
           // Close any open inline styles at paragraph end to prevent carry-over between paragraphs
-          std::vector<char> tempStack = inlineStyleEmitted;  // Copy stack to close in reverse order
-          while (!tempStack.empty()) {
-            char emitted = tempStack.back();
-            tempStack.pop_back();
-            if (emitted != '\0') {
-              writeStyleResetToken(buffer, emitted);
-            }
+          // Use the *written* inline combination so we close whatever was actually emitted
+          // into the output buffer instead of the abstract current state.
+          if (writtenInlineCombined_ != '\0') {
+            writeStyleResetToken(buffer, writtenInlineCombined_);
+            writtenInlineCombined_ = '\0';
           }
-          // Clear the stack since we closed them
-          while (!inlineStyleEmitted.empty()) {
-            inlineStyleEmitted.pop_back();
-          }
+          // Reset base style and inline stack at paragraph end
+          baseInlineStyle_ = InlineStyleState();
+          currentInlineCombined_ = '\0';
+          inlineStyleStack_.clear();
 
           buffer += "\n";
         }
@@ -365,8 +456,7 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
         continue;
       }
 
-      // Check for &nbsp; before normalizing (marks intentional spacing)
-      if (text.indexOf('\xA0') >= 0) {
+      if (text.indexOf("\xC2\xA0") >= 0) {
         lineHasNbsp = true;
       }
 
@@ -388,16 +478,26 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
       writeParagraphStyleToken(buffer, pendingParagraphClasses, pendingInlineStyle, paragraphClassesWritten,
                                paragraphStyleEmitted);
 
+      // Ensure inline style tokens (open/close) are emitted right before we write visible text
+      ensureInlineStyleEmitted(buffer);
+
       // Append text
       buffer += text;
       lineHasContent = true;
     }
 
-    // Periodic flush removed to avoid splitting lines
-    // if (buffer.length() > FLUSH_THRESHOLD) {
-    //   out.print(buffer);
-    //   buffer = "";
-    // }
+    // Periodic flush to avoid excessive memory use and ensure data hits SD
+    if (buffer.length() > FLUSH_THRESHOLD) {
+      size_t toWrite = buffer.length();
+      size_t written = out.write((const uint8_t*)buffer.c_str(), toWrite);
+      if (outBytes)
+        *outBytes += written;
+      if (written != toWrite) {
+        Serial.printf("WARNING: partial write during conversion: attempted=%u wrote=%u\n", (unsigned)toWrite,
+                      (unsigned)written);
+      }
+      buffer = "";
+    }
   }
 
   // Close any remaining open styles before final flush
@@ -415,23 +515,31 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
     paragraphStyleEmitted.clear();
   }
 
-  // Close any remaining inline styles
-  while (!inlineStyleEmitted.empty()) {
-    char emitted = inlineStyleEmitted.back();
-    inlineStyleEmitted.pop_back();
-    if (emitted != '\0') {
-      writeStyleResetToken(buffer, emitted);
-    }
+  // Close any remaining inline styles (close what was actually emitted)
+  if (writtenInlineCombined_ != '\0') {
+    writeStyleResetToken(buffer, writtenInlineCombined_);
+    writtenInlineCombined_ = '\0';
   }
+  // Reset base and stack state
+  baseInlineStyle_ = InlineStyleState();
+  currentInlineCombined_ = '\0';
+  inlineStyleStack_.clear();
 
-  // Final flush
+  // Periodic flush and final flush using write() to verify bytes written
+  if (outBytes)
+    *outBytes = 0;
+
   if (buffer.length() > 0) {
-    out.print(buffer);
+    size_t toWrite = buffer.length();
+    size_t written = out.write((const uint8_t*)buffer.c_str(), toWrite);
+    if (outBytes)
+      *outBytes += written;
+    if (written != toWrite) {
+      Serial.printf("WARNING: partial write: attempted=%u wrote=%u\n", (unsigned)toWrite, (unsigned)written);
+    }
+    buffer = "";
   }
 }
-
-// Helper functions removed - now inlined in performXhtmlToTxtConversion
-// processStartElement, processEndElement, processTextNode are no longer used
 
 bool EpubWordProvider::isInsideSkippedElement(const std::vector<String>& elementStack) {
   for (const String& elem : elementStack) {
@@ -480,7 +588,7 @@ String EpubWordProvider::readAndDecodeText(SimpleXmlParser& parser) {
 
 String EpubWordProvider::decodeHtmlEntity(const String& entity) {
   if (entity == "&nbsp;")
-    return "\xA0";  // Non-breaking space (0xA0) - used to detect intentional blank lines
+    return "\xC2\xA0";  // Non-breaking space
   if (entity == "&amp;")
     return "&";
   if (entity == "&lt;")
@@ -503,8 +611,9 @@ String EpubWordProvider::normalizeWhitespace(const String& text) {
     char c = text.charAt(i);
 
     // Convert non-breaking space to regular space
-    if (c == '\xA0') {
+    if (c == '\xC2' && i + 1 < text.length() && text.charAt(i + 1) == '\xA0') {
       c = ' ';
+      i++;  // skip the second byte (0xA0)
     }
 
     bool isSpace = (c == ' ' || c == '\n');
@@ -543,60 +652,56 @@ String EpubWordProvider::trimLeadingSpaces(const String& text) {
 }
 char EpubWordProvider::writeInlineStyleToken(String& writeBuffer, const String& elementName, const String& classAttr,
                                              const String& styleAttr) {
-  // Determine style from element name and/or CSS classes
-  bool isBold = false;
-  bool isItalic = false;
-
-  // Check element name for implicit styling
+  // Determine style flags for this element (from tag name, classes, inline styles)
+  InlineStyleState state;
+  // Tag name - these are explicit declarations
   if (elementName == "b" || elementName == "strong") {
-    isBold = true;
+    state.bold = true;
+    state.hasBold = true;
   } else if (elementName == "i" || elementName == "em") {
-    isItalic = true;
+    state.italic = true;
+    state.hasItalic = true;
   }
 
   // Check CSS classes and inline styles for additional styling
   const CssParser* css = epubReader_ ? epubReader_->getCssParser() : nullptr;
   if (css) {
     CssStyle combined;
-
-    // Get class-based styles
     if (!classAttr.isEmpty()) {
       combined = css->getCombinedStyle(classAttr);
     }
-
-    // Merge inline styles
     if (!styleAttr.isEmpty()) {
       CssStyle inlineStyle = css->parseInlineStyle(styleAttr);
       combined.merge(inlineStyle);
     }
-
-    // Apply CSS-defined styles
-    if (combined.hasFontWeight && combined.fontWeight == CssFontWeight::Bold) {
-      isBold = true;
+    if (combined.hasFontWeight) {
+      state.hasBold = true;
+      state.bold = (combined.fontWeight == CssFontWeight::Bold);
     }
-    if (combined.hasFontStyle && combined.fontStyle == CssFontStyle::Italic) {
-      isItalic = true;
-    }
-  }
-
-  // Only emit token if there's a style to apply
-  // Format: ESC + 'B'(bold), 'I'(italic), 'X'(bold+italic)
-  if (isBold || isItalic) {
-    writeBuffer += (char)0x1B;  // ESC
-
-    if (isBold && isItalic) {
-      writeBuffer += 'X';
-      return 'X';
-    } else if (isBold) {
-      writeBuffer += 'B';
-      return 'B';
-    } else {
-      writeBuffer += 'I';
-      return 'I';
+    if (combined.hasFontStyle) {
+      state.hasItalic = true;
+      state.italic = (combined.fontStyle == CssFontStyle::Italic);
     }
   }
 
-  return '\0';  // No style token emitted
+  // Push this element's style onto the stack
+  inlineStyleStack_.push_back(state);
+
+  // Recompute the effective combined style including the paragraph base style
+  updateEffectiveInlineCombined();
+
+  return currentInlineCombined_;
+}
+
+void EpubWordProvider::closeInlineStyleElement(String& writeBuffer) {
+  if (inlineStyleStack_.empty())
+    return;
+
+  // Pop the last element and recompute the effective combined style which
+  // takes paragraph base and any explicit overrides in the stack into account.
+  inlineStyleStack_.pop_back();
+
+  updateEffectiveInlineCombined();
 }
 
 void EpubWordProvider::writeStyleResetToken(String& writeBuffer, char startCmd) {
@@ -612,9 +717,63 @@ void EpubWordProvider::writeStyleResetToken(String& writeBuffer, char startCmd) 
   writeBuffer += endCmd;      // Reset token corresponding to startCmd
 }
 
+void EpubWordProvider::ensureInlineStyleEmitted(String& writeBuffer) {
+  // If the written style already matches current, nothing to do
+  if (writtenInlineCombined_ == currentInlineCombined_)
+    return;
+
+  // Close whatever was previously emitted
+  if (writtenInlineCombined_ != '\0') {
+    writeStyleResetToken(writeBuffer, writtenInlineCombined_);
+  }
+
+  // Open new combined style if any
+  if (currentInlineCombined_ != '\0') {
+    writeBuffer += (char)0x1B;
+    writeBuffer += currentInlineCombined_;
+  }
+
+  // Update the written-tracking state
+  writtenInlineCombined_ = currentInlineCombined_;
+}
+
+void EpubWordProvider::updateEffectiveInlineCombined() {
+  // Start with base style if specified; otherwise defaults to not-set (false)
+  bool effectiveBold = false;
+  bool effectiveItalic = false;
+  if (baseInlineStyle_.hasBold) {
+    effectiveBold = baseInlineStyle_.bold;
+  }
+  if (baseInlineStyle_.hasItalic) {
+    effectiveItalic = baseInlineStyle_.italic;
+  }
+
+  // Apply stack entries in order: any entry that explicitly specifies a property
+  // overrides the current effective value for that property.
+  for (const auto& s : inlineStyleStack_) {
+    if (s.hasBold) {
+      effectiveBold = s.bold;
+    }
+    if (s.hasItalic) {
+      effectiveItalic = s.italic;
+    }
+  }
+
+  char newCombined = '\0';
+  if (effectiveBold && effectiveItalic)
+    newCombined = 'X';
+  else if (effectiveBold)
+    newCombined = 'B';
+  else if (effectiveItalic)
+    newCombined = 'I';
+
+  currentInlineCombined_ = newCombined;
+}
+
 // Context for true streaming: EPUB -> Parser -> TXT
 struct TrueStreamingContext {
   epub_stream_context* epubStream;
+  size_t bytesPulled = 0;
 };
 
 // Callback for SimpleXmlParser to pull data from EPUB stream
@@ -626,10 +785,14 @@ static int parser_stream_callback(char* buffer, size_t maxSize, void* userData) 
 
   // Pull next chunk from EPUB decompressor
   int bytesRead = epub_read_chunk(ctx->epubStream, buffer, maxSize);
+  if (bytesRead > 0) {
+    ctx->bytesPulled += (size_t)bytesRead;
+  }
   return bytesRead;
 }
 
-bool EpubWordProvider::convertXhtmlStreamToTxt(const char* epubFilename, String& outTxtPath) {
+bool EpubWordProvider::convertXhtmlStreamToTxt(const char* epubFilename, String& outTxtPath,
+                                               ConversionTimings* timings) {
   if (!epubReader_) {
     return false;
   }
@@ -650,8 +813,37 @@ bool EpubWordProvider::convertXhtmlStreamToTxt(const char* epubFilename, String&
   }
 
   // Start pull-based streaming from EPUB
-  unsigned long startMs = millis();
+  unsigned long totalStartMs = millis();
+  unsigned long t0 = millis();
+  // If the TXT file already exists and is non-empty, reuse it and skip conversion
+  if (SD.exists(dest.c_str())) {
+    File chk = SD.open(dest.c_str());
+    if (chk) {
+      size_t sz = chk.size();
+      chk.close();
+      if (sz > 0) {
+        if (timings) {
+          timings->total = 0;
+          timings->startStream = 0;
+          timings->parserOpen = 0;
+          timings->outOpen = 0;
+          timings->conversion = 0;
+          timings->parserClose = 0;
+          timings->endStream = 0;
+          timings->closeOut = 0;
+          timings->bytes = sz;
+        }
+        Serial.printf("  Reusing existing streamed TXT: %s  —  %u bytes\n", dest.c_str(), (unsigned)sz);
+        outTxtPath = dest;
+        return true;
+      }
+    }
+  }
+
   epub_stream_context* epubStream = epubReader_->startStreaming(epubFilename, 8192);
+  unsigned long startStreamingMs = millis() - t0;
+  if (timings)
+    timings->startStream = startStreamingMs;
   if (!epubStream) {
     Serial.println("ERROR: Failed to start EPUB streaming");
     return false;
@@ -663,37 +855,95 @@ bool EpubWordProvider::convertXhtmlStreamToTxt(const char* epubFilename, String&
 
   // Open parser in streaming mode
   SimpleXmlParser parser;
+  t0 = millis();
+  // Memory debug: before opening parser from stream
+  uint32_t heapBeforeParserOpen = ESP.getFreeHeap();
+  Serial.printf("  [MEM] before parser.openFromStream: Free=%u, Total=%u, MinFree=%u\n", heapBeforeParserOpen,
+                ESP.getHeapSize(), ESP.getMinFreeHeap());
+
   if (!parser.openFromStream(parser_stream_callback, &streamCtx)) {
+    // Log memory on failure
+    uint32_t heapFail = ESP.getFreeHeap();
+    int32_t failDelta = (int32_t)heapFail - (int32_t)heapBeforeParserOpen;
+    Serial.printf("  [MEM] parser.openFromStream FAILED: Free=%u (delta: %d)\n", heapFail, failDelta);
     epub_end_streaming(epubStream);
     Serial.println("ERROR: Failed to open parser in streaming mode");
     return false;
   }
+  // Memory debug: after successful parser open
+  uint32_t heapAfterParserOpen = ESP.getFreeHeap();
+  int32_t parserOpenDelta = (int32_t)heapAfterParserOpen - (int32_t)heapBeforeParserOpen;
+  Serial.printf("  [MEM] after parser.openFromStream: Free=%u (delta: %d)\n", heapAfterParserOpen, parserOpenDelta);
+  unsigned long parserOpenMs = millis() - t0;
+  if (timings)
+    timings->parserOpen = parserOpenMs;
 
-  // Remove existing file to ensure clean write
+  // Remove existing file to ensure clean write (timed)
+  t0 = millis();
   if (SD.exists(dest.c_str())) {
     SD.remove(dest.c_str());
   }
-
   File out = SD.open(dest.c_str(), FILE_WRITE);
+  unsigned long outOpenMs = millis() - t0;
   if (!out) {
     Serial.printf("ERROR: Failed to open output TXT file '%s' for writing\n", dest.c_str());
     parser.close();
     epub_end_streaming(epubStream);
     return false;
   }
+  Serial.printf("  Output file open took  %lu ms\n", outOpenMs);
+  if (timings)
+    timings->outOpen = outOpenMs;
 
-  // Perform the conversion using common logic
-  // Parser pulls data from EPUB stream as needed
-  performXhtmlToTxtConversion(parser, out);
+  // Perform the conversion using common logic (timed)
+  t0 = millis();
+  size_t bytesWritten = 0;
+  performXhtmlToTxtConversion(parser, out, &bytesWritten);
+  unsigned long conversionMs = millis() - t0;
+  if (timings)
+    timings->conversion = conversionMs;
 
-  // Check how much was written
-  size_t bytesWritten = out.size();
-
+  // Close parser and streaming in separate timed steps
+  t0 = millis();
   parser.close();
+  unsigned long parserCloseMs = millis() - t0;
+  if (timings)
+    timings->parserClose = parserCloseMs;
+
+  t0 = millis();
   epub_end_streaming(epubStream);
+  unsigned long endStreamMs = millis() - t0;
+  if (timings)
+    timings->endStream = endStreamMs;
+
+  t0 = millis();
   out.close();
-  unsigned long elapsedMs = millis() - startMs;
-  Serial.printf("Converted XHTML to TXT (streamed): %s — %lu ms\n", dest.c_str(), elapsedMs);
+  unsigned long closeOutMs = millis() - t0;
+  if (timings)
+    timings->closeOut = closeOutMs;
+
+  // Re-open the output file to get final size (some SD implementations report size=0 until closed)
+  File check = SD.open(dest.c_str());
+  size_t checkSize = 0;
+  if (check) {
+    checkSize = check.size();
+    check.close();
+  }
+  Serial.printf("  [STREAM] bytesPulled=%u, bytesWrittenReported=%u\n", (unsigned)streamCtx.bytesPulled,
+                (unsigned)checkSize);
+  bytesWritten = checkSize;
+
+  unsigned long totalMs = millis() - totalStartMs;
+  if (timings) {
+    timings->total = totalMs;
+    timings->bytes = (unsigned int)bytesWritten;
+  }
+  Serial.printf(
+      "Converted XHTML to TXT (streamed): %s  —  total = %lu ms  ( startStream = %lu, parserOpen = %lu, outOpen = %lu, "
+      "conversion = "
+      "%lu, parserClose = %lu, endStream = %lu, closeOut = %lu )  —  %u bytes\n",
+      dest.c_str(), totalMs, startStreamingMs, parserOpenMs, (timings ? timings->outOpen : 0), conversionMs,
+      parserCloseMs, endStreamMs, closeOutMs, (unsigned int)bytesWritten);
   outTxtPath = dest;
   return true;
 }
@@ -705,11 +955,13 @@ bool EpubWordProvider::openChapter(int chapterIndex) {
 
   int spineCount = epubReader_->getSpineCount();
   if (chapterIndex < 0 || chapterIndex >= spineCount) {
+    Serial.printf("ERROR: Chapter index %d out of range (0 to %d)\n", chapterIndex, spineCount - 1);
     return false;
   }
 
   const SpineItem* spineItem = epubReader_->getSpineItem(chapterIndex);
   if (!spineItem) {
+    Serial.printf("ERROR: Failed to get spine item for chapter index %d\n", chapterIndex);
     return false;
   }
 
@@ -731,21 +983,38 @@ bool EpubWordProvider::openChapter(int chapterIndex) {
 
   // Convert XHTML to text file using selected method
   String txtPath;
+  unsigned long convStart = millis();
   if (useStreamingConversion_) {
     // Stream XHTML from EPUB directly to memory and convert (no intermediate XHTML file)
-    if (!convertXhtmlStreamToTxt(fullHref.c_str(), txtPath)) {
+    ConversionTimings t;
+    if (!convertXhtmlStreamToTxt(fullHref.c_str(), txtPath, &t)) {
       return false;
     }
+    // Print detailed breakdown for chapter-level conversion
+    Serial.printf(
+        "    Converted XHTML to TXT (streamed): %s  —  total = %lu ms  ( startStream = %lu, parserOpen = %lu, outOpen "
+        "= %lu, conversion = %lu, parserClose = %lu, endStream = %lu, closeOut = %lu )  —  %u bytes\n",
+        txtPath.c_str(), t.total, t.startStream, t.parserOpen, t.outOpen, t.conversion, t.parserClose, t.endStream,
+        t.closeOut, (unsigned int)t.bytes);
   } else {
     // Extract XHTML file first, then convert from file
     String xhtmlPath = epubReader_->getFile(fullHref.c_str());
     if (xhtmlPath.isEmpty()) {
       return false;
     }
-    if (!convertXhtmlToTxt(xhtmlPath, txtPath)) {
+    ConversionTimings t;
+    if (!convertXhtmlToTxt(xhtmlPath, txtPath, &t)) {
       return false;
     }
+    // Print detailed breakdown for chapter-level conversion when using file-based conversion
+    Serial.printf(
+        "    Converted XHTML to TXT: %s  —  total = %lu ms  ( parserOpen = %lu, outOpen = %lu, conversion = %lu, "
+        "parserClose = %lu, closeOut = %lu )  —  %u bytes\n",
+        txtPath.c_str(), t.total, t.parserOpen, t.outOpen, t.conversion, t.parserClose, t.closeOut,
+        (unsigned int)t.bytes);
   }
+  unsigned long conversionAndExtractMs = millis() - convStart;
+  Serial.printf("  Chapter conversion + extract took  %lu ms\n", conversionAndExtractMs);
 
   String newXhtmlPath = fullHref;  // Keep for tracking
 
@@ -754,7 +1023,10 @@ bool EpubWordProvider::openChapter(int chapterIndex) {
     delete fileProvider_;
     fileProvider_ = nullptr;
   }
+  unsigned long fileProvStart = millis();
   fileProvider_ = new FileWordProvider(txtPath.c_str(), bufSize_);
+  unsigned long fileProvMs = millis() - fileProvStart;
+  Serial.printf("    FileWordProvider init took  %lu ms\n", fileProvMs);
   if (!fileProvider_ || !fileProvider_->isValid()) {
     if (fileProvider_) {
       delete fileProvider_;
@@ -777,6 +1049,8 @@ bool EpubWordProvider::openChapter(int chapterIndex) {
 
   // Initialize index to start of chapter; do not parse nodes yet
   currentIndex_ = 0;
+
+  Serial.printf("Opened chapter %d: %s\n", chapterIndex, currentChapterName_.c_str());
 
   return true;
 }

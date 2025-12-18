@@ -34,7 +34,7 @@ struct TocItem {
  */
 class EpubReader {
  public:
-  EpubReader(const char* epubPath);
+  EpubReader(const char* epubPath, bool cleanCacheOnStart = false);
   ~EpubReader();
 
   bool isValid() const {
@@ -56,10 +56,10 @@ class EpubReader {
     return nullptr;
   }
   int getTocCount() const {
-    return tocCount_;
+    return (int)toc_.size();
   }
   const TocItem* getTocItem(int index) const {
-    if (index >= 0 && index < tocCount_) {
+    if (index >= 0 && index < (int)toc_.size()) {
       return &toc_[index];
     }
     return nullptr;
@@ -71,12 +71,6 @@ class EpubReader {
    * Returns empty string if file not found or extraction failed
    */
   String getFile(const char* filename);
-
-  /**
-   * Extract a file from EPUB to memory using callback
-   * Returns true if successful
-   */
-  bool extractToMemory(const char* filename, int (*callback)(const void*, size_t, void*), void* userData);
 
   /**
    * Start pull-based streaming extraction of a file
@@ -145,12 +139,21 @@ class EpubReader {
   bool openEpub();
   void closeEpub();
   bool ensureExtractDirExists();
+  bool checkAndUpdateExtractMeta();
   bool isFileExtracted(const char* filename);
   bool extractFile(const char* filename);
   bool parseContainer();
   bool parseContentOpf();
   bool parseTocNcx();
   bool parseCssFiles();
+  bool cleanExtractDir();
+  bool extractAll();
+
+  struct ManifestItem {
+    String id;
+    String href;
+    String mediaType;
+  };
 
   String epubPath_;
   String extractDir_;
@@ -166,11 +169,11 @@ class EpubReader {
   size_t* spineOffsets_ = nullptr;  // Cumulative offset for each spine item
   size_t totalBookSize_ = 0;        // Total size of all spine items
 
-  TocItem* toc_;
-  int tocCount_ = 0;
+  std::vector<TocItem> toc_;
 
   CssParser* cssParser_ = nullptr;
   std::vector<String> cssFiles_;  // List of CSS file paths (relative to content.opf)
+  bool cleanCacheOnStart_ = false;
 };
 
 #endif

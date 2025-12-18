@@ -70,6 +70,17 @@ class EpubWordProvider : public WordProvider {
   }
 
  private:
+  struct ConversionTimings {
+    unsigned long startStream = 0;
+    unsigned long parserOpen = 0;
+    unsigned long outOpen = 0;
+    unsigned long conversion = 0;
+    unsigned long parserClose = 0;
+    unsigned long endStream = 0;
+    unsigned long closeOut = 0;
+    unsigned long total = 0;
+    size_t bytes = 0;
+  };
   // Opens a specific chapter (spine item) for reading
   bool openChapter(int chapterIndex);
 
@@ -86,13 +97,14 @@ class EpubWordProvider : public WordProvider {
   bool isInlineStyleElement(const String& name);
 
   // Convert an XHTML file to a plain-text file suitable for FileWordProvider.
-  bool convertXhtmlToTxt(const String& srcPath, String& outTxtPath);
+  bool convertXhtmlToTxt(const String& srcPath, String& outTxtPath, ConversionTimings* timings = nullptr);
 
   // Convert XHTML from EPUB stream to plain-text file (no intermediate XHTML file)
-  bool convertXhtmlStreamToTxt(const char* epubFilename, String& outTxtPath);
+  bool convertXhtmlStreamToTxt(const char* epubFilename, String& outTxtPath, ConversionTimings* timings = nullptr);
 
   // Common conversion logic used by both convertXhtmlToTxt and convertXhtmlStreamToTxt
-  void performXhtmlToTxtConversion(SimpleXmlParser& parser, File& out);
+  // If outBytes is provided, it will be set to the number of bytes written to `out`.
+  void performXhtmlToTxtConversion(SimpleXmlParser& parser, File& out, size_t* outBytes = nullptr);
 
   // Emit style properties for a paragraph's classes and inline styles as an escaped token written to buffer
   void writeParagraphStyleToken(String& writeBuffer, const String& pendingParagraphClasses,
@@ -104,8 +116,40 @@ class EpubWordProvider : public WordProvider {
   char writeInlineStyleToken(String& writeBuffer, const String& elementName, const String& classAttr,
                              const String& styleAttr);
 
+  // Close an inline style element (called when an inline element ends)
+  void closeInlineStyleElement(String& writeBuffer);
+
+  // Track active inline style stack for correct combined styling (bold+italic = 'X')
+  struct InlineStyleState {
+    // Value and whether it was explicitly specified for this element.
+    // If hasBold/hasItalic is true, the corresponding value should override
+    // any previously-set base or ancestor inline styles.
+    bool bold = false;
+    bool italic = false;
+    bool hasBold = false;
+    bool hasItalic = false;
+  };
+  std::vector<InlineStyleState> inlineStyleStack_;
+  char currentInlineCombined_ = '\0';
+  // The currently-written inline style combination (what's been emitted to the buffer).
+  // This is kept separate from `currentInlineCombined_` (the effective style) so we
+  // can delay emitting style tokens until the moment actual text is written.
+  char writtenInlineCombined_ = '\0';
+  // Base inline style (from paragraph-level CSS classes / inline style)
+  InlineStyleState baseInlineStyle_;
+
+  // Recompute the effective combined style char (`currentInlineCombined_`) from
+  // the paragraph base style and the inline style stack (stack entries can
+  // explicitly override base and ancestor values if they specify the property).
+  void updateEffectiveInlineCombined();
+
   // Emit style reset token (to return to normal after inline style element closes)
   void writeStyleResetToken(String& writeBuffer, char startCmd);
+
+  // Ensure that the currently-emitted inline style in the output buffer matches
+  // the effective inline style state (`currentInlineCombined_`). This will emit
+  // the necessary reset/open tokens just before writing visible text.
+  void ensureInlineStyleEmitted(String& writeBuffer);
 
   // Helper to create directories recursively for a given path
   bool createDirRecursive(const String& path);

@@ -48,11 +48,11 @@ Before flashing custom firmware, back up the factory firmware:
 
 ```powershell
 # Read entire 16MB flash
-esptool.py --chip esp32c3 --port COM5 read_flash 0x0 0x1000000 firmware_backup.bin
+python -m esptool --chip esp32c3 --port COM5 read_flash 0x0 0x1000000 firmware_backup.bin
 ```
 ```powershell
 # Read only app0 (faster)
-esptool.py --chip esp32c3 --port COM5 read_flash 0x10000 0x640000 app0_backup.bin
+python -m esptool --chip esp32c3 --port COM5 read_flash 0x10000 0x640000 app0_backup.bin
 ```
 
 
@@ -62,12 +62,12 @@ To restore the backed-up firmware:
 
 ```powershell
 # Write back the entire flash
-esptool.py --chip esp32c3 --port COM5 write_flash 0x0 firmware_backup.bin
+python -m esptool --chip esp32c3 --baud 921600 --port COM5 write_flash 0x0 firmware_backup.bin
 ```
 
 ```powershell
 # Write back only app0 (faster)
-esptool.py --chip esp32c3 --port COM5 write_flash 0x10000 app0_backup.bin
+python -m esptool --chip esp32c3 --baud 921600 --port COM5 write_flash 0x10000 app0_backup.bin
 ```
 
 **Important**: Make sure to use the correct COM port for your device.
@@ -118,6 +118,19 @@ python scripts/generate_simplefont/gui.py
 `scripts/simple_convert_image.py` - Convert images to C++ byte arrays for display
 - Supports 1-bit (B&W) and 2-bit (4-level grayscale) output
 - Generates .h header files
+
+## Settings consolidation
+
+Settings are now consolidated into a single file stored at `/microreader/settings.cfg` on the SD card. The file uses a simple key=value format and is intentionally easy to extend.
+
+Keys of note:
+- `ui.screen` - integer last-visible screen id
+- `textviewer.lastPath` - last opened file path
+- `textviewer.layout` - layout CSV matching previous format
+
+Per-file positions are stored in `.pos` files next to each document (e.g. `/books/foo.txt.pos`) and continue to be used as before; they are not part of `settings.cfg`.
+
+The Settings manager is implemented in `src/core/Settings.{h,cpp}`.
 
 ### LUT Editor
 `scripts/lut_editor.py` - Visual editor for e-ink display waveform lookup tables

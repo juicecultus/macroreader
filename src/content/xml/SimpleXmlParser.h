@@ -168,8 +168,8 @@ class SimpleXmlParser {
   bool streamEOF_;                 // True when stream has reached EOF
 
   // Buffering for faster I/O
-  static const size_t BUFFER_SIZE = 8192;
-  static const size_t NUM_STREAM_BUFFERS = 3;  // Number of sliding window buffers for streaming
+  static const size_t BUFFER_SIZE = 4096;      // Reduced to lower memory usage
+  static const size_t NUM_STREAM_BUFFERS = 2;  // Number of sliding window buffers for streaming (reduced to save RAM)
 
   uint8_t* buffer_;        // Primary buffer for file/memory mode (heap allocated to avoid stack overflow)
   size_t bufferStartPos_;  // File position of first byte in buffer

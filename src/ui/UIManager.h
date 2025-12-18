@@ -25,6 +25,8 @@ struct EnumClassHash {
   }
 };
 
+class Settings;
+
 class UIManager {
  public:
   // Typed screen identifiers so callers don't use raw indices
@@ -32,6 +34,7 @@ class UIManager {
 
   // Constructor
   UIManager(EInkDisplay& display, class SDCardManager& sdManager);
+  ~UIManager();
 
   void begin();
   void handleButtons(Buttons& buttons);
@@ -55,6 +58,14 @@ class UIManager {
   // Map holding owning pointers to the screens; screens are
   // constructed in the .cpp ctor and live for the UIManager lifetime.
   std::unordered_map<ScreenId, std::unique_ptr<Screen>, EnumClassHash> screens;
+
+  // Global settings manager (single consolidated settings file)
+  class Settings* settings = nullptr;
+
+ public:
+  Settings& getSettings() {
+    return *settings;
+  }
 };
 
 #endif
