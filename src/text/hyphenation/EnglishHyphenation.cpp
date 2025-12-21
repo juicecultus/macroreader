@@ -34,7 +34,8 @@ bool isVowel(char32_t c) {
 
 // Y is treated as a vowel when it appears after a consonant and before another consonant or end
 bool isVowelInContext(char32_t c, size_t pos, const std::u32string& word) {
-  if (isVowel(c)) return true;
+  if (isVowel(c))
+    return true;
 
   char32_t lower = toLowerEnglish(c);
   if (lower == U'y' && pos > 0) {
@@ -55,17 +56,14 @@ bool isAllowedOnset(const std::u32string& onset) {
   // Common English syllable onsets (consonant clusters that can start a syllable)
   static const std::vector<std::u32string> allowed = {
       // Single consonants
-      U"b", U"c", U"d", U"f", U"g", U"h", U"j", U"k", U"l", U"m",
-      U"n", U"p", U"q", U"r", U"s", U"t", U"v", U"w", U"x", U"y", U"z",
+      U"b", U"c", U"d", U"f", U"g", U"h", U"j", U"k", U"l", U"m", U"n", U"p", U"q", U"r", U"s", U"t", U"v", U"w", U"x",
+      U"y", U"z",
       // Two-consonant clusters
-      U"bl", U"br", U"ch", U"cl", U"cr", U"dr", U"dw", U"fl", U"fr",
-      U"gh", U"gl", U"gn", U"gr", U"kn", U"ph", U"pl", U"pr", U"qu",
-      U"sc", U"sh", U"sk", U"sl", U"sm", U"sn", U"sp", U"sq", U"st",
-      U"sw", U"th", U"tr", U"tw", U"wh", U"wr",
+      U"bl", U"br", U"ch", U"cl", U"cr", U"dr", U"dw", U"fl", U"fr", U"gh", U"gl", U"gn", U"gr", U"kn", U"ph", U"pl",
+      U"pr", U"qu", U"sc", U"sh", U"sk", U"sl", U"sm", U"sn", U"sp", U"sq", U"st", U"sw", U"th", U"tr", U"tw", U"wh",
+      U"wr",
       // Three-consonant clusters
-      U"chr", U"sch", U"scr", U"shr", U"sph", U"spl", U"spr", U"squ",
-      U"str", U"thr"
-  };
+      U"chr", U"sch", U"scr", U"shr", U"sph", U"spl", U"spr", U"squ", U"str", U"thr"};
 
   return std::find(allowed.begin(), allowed.end(), onset) != allowed.end();
 }
@@ -84,6 +82,55 @@ std::u32string toLower(const std::u32string& input) {
     result.push_back(toLowerEnglish(c));
   }
   return result;
+}
+
+// Extend inseparable consonant pairs
+bool isInseparablePair(const std::u32string& pair) {
+  static const std::vector<std::u32string> pairs = {U"ch", U"ck", U"gh", U"gn", U"kn", U"ph", U"sh", U"th",
+                                                    U"wh", U"wr", U"rd", U"ld", U"lt", U"nd", U"nt", U"st"};
+  for (const auto& p : pairs) {
+    if (pair == p) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Extend prefix and suffix handling with stricter rules
+bool isCommonPrefix(const std::u32string& word, size_t pos) {
+  static const std::vector<std::u32string> prefixes = {U"re", U"un", U"in", U"dis", U"pre", U"trans", U"align", U"pro"};
+  for (const auto& prefix : prefixes) {
+    if (pos == prefix.size() && word.substr(0, pos) == prefix) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Return the length of the common prefix if the word starts with one, otherwise 0.
+size_t findCommonPrefixLength(const std::u32string& word) {
+  static const std::vector<std::u32string> prefixes = {U"re", U"un", U"in", U"dis", U"pre", U"trans", U"align", U"pro"};
+  for (const auto& prefix : prefixes) {
+    if (word.size() >= prefix.size() && word.substr(0, prefix.size()) == prefix) {
+      return prefix.size();
+    }
+  }
+  return 0;
+}
+
+bool isCommonSuffix(const std::u32string& word, size_t pos) {
+  static const std::vector<std::u32string> suffixes = {U"ing", U"ed", U"er", U"ly", U"tion", U"ment", U"able", U"ate"};
+  for (const auto& suffix : suffixes) {
+    if (pos + suffix.size() == word.size() && word.substr(pos) == suffix) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Avoid splitting within prefixes and suffixes
+bool isWithinPrefixOrSuffix(const std::u32string& word, size_t pos) {
+  return isCommonPrefix(word, pos) || isCommonSuffix(word, pos);
 }
 
 }  // namespace
@@ -109,23 +156,6 @@ std::vector<size_t> hyphenate(const std::string& word) {
     return positions;
   }
 
-  // Inseparable consonant pairs that should stay together
-  auto isInseparablePair = [](const std::u32string& pair) {
-    static const std::vector<std::u32string> pairs = {
-        U"ch", U"ck", U"gh", U"gn", U"kn", U"ph", U"sh", U"th", U"wh", U"wr"
-    };
-    for (const auto& p : pairs) {
-      if (pair == p) {
-        return true;
-      }
-    }
-    return false;
-  };
-
-  auto isDoubleConsonant = [](const std::u32string& pair) {
-    return pair.size() == 2 && pair[0] == pair[1] && isConsonant(pair[0]);
-  };
-
   // Process consonant clusters between vowels
   for (size_t i = 0; i + 1 < vowelIndices.size(); ++i) {
     size_t leftVowel = vowelIndices[i];
@@ -143,64 +173,68 @@ std::vector<size_t> hyphenate(const std::string& word) {
 
     std::u32string cluster(lower.begin() + clusterStart, lower.begin() + clusterEnd);
 
-    // Special handling for common patterns
-
-    // Double consonants: split between them (run-ning, let-ter)
-    if (boundary == 0 && consonantCount == 2) {
-      if (isDoubleConsonant(cluster)) {
-        boundary = clusterStart + 1;
-      }
+    // Check for common prefixes and suffixes
+    size_t prefixLen = findCommonPrefixLength(lower);
+    if (prefixLen > 0 && clusterStart <= prefixLen) {
+      // If the computed split would fall inside a known prefix, push the boundary
+      // to the end of the prefix rather than splitting the prefix itself.
+      boundary = prefixLen;
+    } else if (isCommonSuffix(lower, clusterEnd)) {
+      boundary = clusterEnd;
     }
 
-    // Inseparable pairs stay on the right (fa-ther, gra-phic)
-    if (boundary == 0 && consonantCount == 2) {
-      if (isInseparablePair(cluster)) {
-        boundary = clusterStart;
-      }
+    // Avoid splitting within prefixes or suffixes
+    if (boundary == 0 && isWithinPrefixOrSuffix(lower, clusterStart)) {
+      continue;
     }
 
-    // Try to find valid onset by checking if entire cluster is allowed
-    if (boundary == 0 && isAllowedOnset(cluster)) {
-      boundary = clusterStart;
-    }
-
-    // Try to find the largest valid onset from the right
-    if (boundary == 0 && consonantCount >= 2) {
-      for (size_t split = 1; split < cluster.size(); ++split) {
-        std::u32string onset(cluster.begin() + split, cluster.end());
-        if (isAllowedOnset(onset)) {
-          // Check if what remains on the left is a valid coda
-          std::u32string coda(cluster.begin(), cluster.begin() + split);
-          // Most single consonants and some pairs are valid codas
-          if (coda.size() <= 2) {
-            boundary = clusterStart + split;
-            break;
-          }
-        }
-      }
-    }
-
-    // Fallback rules
+    // Special handling for consonant clusters
     if (boundary == 0) {
       if (consonantCount == 1) {
-        // Single consonant goes with following vowel (o-pen, a-ble)
         boundary = clusterStart;
       } else if (consonantCount == 2) {
-        std::u32string pair = cluster;
-        if (isInseparablePair(pair)) {
-          boundary = clusterStart;  // Keep pair on right
+        // If both consonants are the same (e.g., 'tt'), split between them: rotting -> rot-ting
+        if (cluster[0] == cluster[1]) {
+          boundary = clusterStart + 1;
+        } else if (isInseparablePair(cluster)) {
+          // Keep inseparable pairs (ch, sh, th, ck, etc.) attached to following syllable
+          boundary = clusterStart;
         } else {
-          boundary = clusterStart + 1;  // Split in middle
+          // Prefer treating the two-letter cluster as an onset of the following syllable
+          // when it's a valid onset (st, tr, pl, etc.). Otherwise split between them.
+          if (isAllowedOnset(cluster)) {
+            boundary = clusterStart;
+          } else {
+            boundary = clusterStart + 1;
+          }
         }
-      } else {  // consonantCount >= 3
-        // Keep last consonant(s) with right syllable
-        std::u32string lastTwo(lower.begin() + clusterEnd - 2, lower.begin() + clusterEnd);
-        if (isInseparablePair(lastTwo) || isAllowedOnset(lastTwo)) {
-          boundary = clusterEnd - 2;
-        } else {
+      } else {
+        // For longer clusters, prefer keeping a valid onset on the right when possible.
+        // Try taking last 3 or last 2 as onset candidates.
+        bool placed = false;
+        if (consonantCount >= 3) {
+          std::u32string last3(lower.begin() + clusterEnd - 3, lower.begin() + clusterEnd);
+          if (isAllowedOnset(last3)) {
+            boundary = clusterEnd - 3;
+            placed = true;
+          }
+        }
+        if (!placed) {
+          std::u32string last2(lower.begin() + clusterEnd - 2, lower.begin() + clusterEnd);
+          if (isAllowedOnset(last2)) {
+            boundary = clusterEnd - 2;
+            placed = true;
+          }
+        }
+        if (!placed) {
           boundary = clusterEnd - 1;
         }
       }
+    }
+
+    // Avoid producing a one-letter leading syllable (boundary == 1)
+    if (boundary == 1 && wide.size() > 2) {
+      boundary = 2;
     }
 
     if (boundary > 0 && boundary < wide.size()) {
@@ -208,30 +242,9 @@ std::vector<size_t> hyphenate(const std::string& word) {
     }
   }
 
-  // Convert character positions to byte positions in UTF-8
-  std::vector<size_t> bytePositions;
-  bytePositions.reserve(positions.size());
-
-  for (size_t charPos : positions) {
-    // Count bytes up to the character position
-    size_t bytePos = 0;
-    size_t currentChar = 0;
-    const char* str = word.c_str();
-
-    // Count through UTF-8 characters
-    while (currentChar < charPos && str[bytePos] != '\0') {
-      // Skip to the next UTF-8 character by advancing past continuation bytes
-      bytePos++;
-      // Skip continuation bytes (10xxxxxx pattern)
-      while (str[bytePos] != '\0' && (str[bytePos] & 0xC0) == 0x80) {
-        bytePos++;
-      }
-      currentChar++;
-    }
-
-    bytePositions.push_back(bytePos);
-  }
-  return bytePositions;
+  // Return character positions (indices into the Unicode codepoint sequence).
+  // Tests and consumers expect positions measured in characters, not byte offsets.
+  return positions;
 }
 
 std::string insertHyphens(const std::string& word, const std::vector<size_t>& positions) {

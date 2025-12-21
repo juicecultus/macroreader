@@ -17,6 +17,28 @@ import re
 from collections import Counter
 import pyphen
 from pathlib import Path
+import zipfile
+
+
+def extract_text_from_epub(epub_path):
+    """Extract textual content from an .epub archive by concatenating HTML/XHTML files."""
+    texts = []
+    with zipfile.ZipFile(epub_path, "r") as z:
+        for name in z.namelist():
+            lower = name.lower()
+            if (
+                lower.endswith(".xhtml")
+                or lower.endswith(".html")
+                or lower.endswith(".htm")
+            ):
+                try:
+                    data = z.read(name).decode("utf-8", errors="ignore")
+                except Exception:
+                    continue
+                # Remove tags
+                text = re.sub(r"<[^>]+>", " ", data)
+                texts.append(text)
+    return "\n".join(texts)
 
 
 def extract_words(text):
@@ -48,8 +70,12 @@ def generate_hyphenation_data(
     print(f"Reading from: {input_file}")
 
     # Read the input file
-    with open(input_file, "r", encoding="utf-8") as f:
-        text = f.read()
+    if str(input_file).lower().endswith(".epub"):
+        print("Detected .epub input; extracting HTML content")
+        text = extract_text_from_epub(input_file)
+    else:
+        with open(input_file, "r", encoding="utf-8") as f:
+            text = f.read()
 
     # Extract words
     print("Extracting words...")
@@ -81,14 +107,15 @@ def generate_hyphenation_data(
         if len(word) < min_length:
             continue
 
-        # Get hyphenation
+        # Get hyphenation (may produce no '=' characters)
         hyphenated = hyphenator.inserted(word, hyphen="=")
 
-        # Only include words that can be hyphenated (contain at least one hyphen point)
-        if "=" in hyphenated:
-            hyphenation_data.append(
-                {"word": word, "hyphenated": hyphenated, "count": count}
-            )
+        # Include all words (so we can take the top N most common words even if
+        # they don't have hyphenation points). This replaces the previous filter
+        # which dropped words without '='.
+        hyphenation_data.append(
+            {"word": word, "hyphenated": hyphenated, "count": count}
+        )
 
         # Stop if we've reached max_words
         if max_words and len(hyphenation_data) >= max_words:
