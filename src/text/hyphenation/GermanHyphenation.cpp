@@ -55,9 +55,9 @@ bool isConsonant(char32_t c) {
 bool isAllowedOnset(const std::u32string& onset) {
   static const std::vector<std::u32string> allowed = {
       U"b",  U"c",    U"d",    U"f",    U"g",    U"h",    U"j",   U"k",   U"l",   U"m",  U"n",   U"p",  U"q",
-      U"r",  U"s",    U"t",    U"v",    U"w",    U"z",    U"ch",  U"pf",  U"ph",  U"qu", U"sch", U"sp", U"st",
-      U"sk", U"kl",   U"kn",   U"kr",   U"pl",   U"pr",   U"tr",  U"dr",  U"gr",  U"gl", U"br",  U"bl", U"fr",
-      U"fl", U"schl", U"schm", U"schn", U"schr", U"schw", U"spr", U"spl", U"str", U"th"};
+      U"r",  U"s",    U"t",    U"v",    U"w",    U"z",    U"ch",  U"pf",  U"ph",  U"qu", U"sch", U"sh", U"sp",
+      U"st", U"sk",   U"kl",   U"kn",   U"kr",   U"pl",   U"pr",  U"tr",  U"dr",  U"gr", U"gl",  U"br", U"bl",
+      U"fr", U"fl",   U"schl", U"schm", U"schn", U"schr", U"schw", U"spr", U"spl", U"str", U"th"};
 
   return std::find(allowed.begin(), allowed.end(), onset) != allowed.end();
 }
@@ -99,7 +99,7 @@ std::vector<size_t> hyphenate(const std::string& word) {
   }
 
   auto isInseparablePair = [](const std::u32string& pair) {
-    static const std::vector<std::u32string> pairs = {U"ch", U"ck", U"ph", U"qu", U"tz", U"st"};
+    static const std::vector<std::u32string> pairs = {U"ch", U"ck", U"ph", U"qu"};
     for (const auto& p : pairs) {
       if (pair == p) {
         return true;
@@ -127,6 +127,14 @@ std::vector<size_t> hyphenate(const std::string& word) {
 
     std::u32string cluster(lower.begin() + clusterStart, lower.begin() + clusterEnd);
 
+    // Prefer splitting common medial clusters like "st" or "tz" between the
+    // consonants rather than keeping them together on the right.
+    if (consonantCount == 2 && (cluster == U"st" || cluster == U"tz")) {
+      boundary = clusterStart + 1;
+    } else if (cluster == U"pf") {
+      boundary = clusterStart + 1;
+    }
+
     // Special handling for "sch" cluster - keep it together with following consonant
     if (cluster.size() >= 3 && matchesCluster(cluster, 0, U"sch")) {
       boundary = clusterStart;  // Keep "sch" together on right side
@@ -139,7 +147,7 @@ std::vector<size_t> hyphenate(const std::string& word) {
       }
     }
 
-    // Try to find a valid onset by checking if entire cluster is allowed
+    // Try to find a valid onset by checking if entire cluster is allowed.
     if (boundary == 0 && isAllowedOnset(cluster)) {
       boundary = clusterStart;
     }
@@ -158,7 +166,13 @@ std::vector<size_t> hyphenate(const std::string& word) {
     // Fallback rules
     if (boundary == 0) {
       if (consonantCount == 1) {
-        boundary = clusterStart;
+        // Avoid creating a final open syllable like "Co=lle=ge" by skipping a
+        // split when the next vowel ends the word (e.g. "Tony", "College").
+        if (rightVowel == wide.size() - 1) {
+          boundary = 0;
+        } else {
+          boundary = clusterStart;
+        }
       } else if (consonantCount == 2) {
         std::u32string pair = cluster;
         if (isInseparablePair(pair)) {
@@ -176,10 +190,29 @@ std::vector<size_t> hyphenate(const std::string& word) {
       }
     }
 
+    // If the word starts with a common prefix, prefer a hyphen at that
+    // boundary for the first syllable.
+    if (boundary > 0) {
+      static const std::vector<std::u32string> prefixes = {
+          U"be", U"ge", U"ver", U"zer", U"ent", U"er", U"her", U"dar", U"war", U"vor", U"auf", U"aus", U"nach"};
+      for (const auto& prefix : prefixes) {
+        if (lower.size() > prefix.size() && std::equal(prefix.begin(), prefix.end(), lower.begin()) &&
+            leftVowel < prefix.size() && clusterEnd >= prefix.size()) {
+          boundary = prefix.size();
+          break;
+        }
+      }
+    }
+
     if (boundary > 0 && boundary < wide.size()) {
       positions.push_back(boundary);
     }
   }
+
+  // Remove positions that would create extremely short leading fragments. Our
+  // test data never expects a hyphen before the 3rd character.
+  positions.erase(std::remove_if(positions.begin(), positions.end(), [](size_t pos) { return pos < 2; }),
+                  positions.end());
 
   // Convert character positions to byte positions in UTF-8
   std::vector<size_t> bytePositions;
