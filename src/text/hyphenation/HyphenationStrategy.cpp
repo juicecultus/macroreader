@@ -17,8 +17,8 @@ std::vector<int> HyphenationStrategy::findHyphenPositions(const std::string& wor
 
   // Add algorithmic hyphenation positions for words without existing hyphens
   if (positions.empty()) {
-    // Use the language-specific hyphenation strategy
-    std::vector<size_t> algorithmicPositions = hyphenate(word, minWordLength, minFragmentLength);
+    // Use the language-specific hyphenation strategy (call member, not global hyphenate)
+    std::vector<size_t> algorithmicPositions = this->hyphenate(word, minWordLength, minFragmentLength);
 
     // Store as negative values to indicate these are algorithmic positions
     // (need hyphen insertion). Offset by -1 so position 0 becomes -1, etc.
@@ -62,47 +62,16 @@ class GermanHyphenationStrategy : public HyphenationStrategy {
 };
 
 /**
- * English hyphenation strategy implementation
- */
-class EnglishHyphenationStrategy : public HyphenationStrategy {
- public:
-  std::vector<size_t> hyphenate(const std::string& word, size_t minWordLength = 6,
-                                size_t minFragmentLength = 3) override {
-    // Only hyphenate words that meet minimum length requirement
-    if (word.length() < minWordLength) {
-      return std::vector<size_t>();
-    }
-
-    // Get hyphenation positions from English algorithm
-    std::vector<size_t> positions = EnglishHyphenation::hyphenate(word);
-
-    // Filter out positions that would create fragments that are too short
-    std::vector<size_t> filtered;
-    for (size_t pos : positions) {
-      if (pos >= minFragmentLength && pos <= word.length() - minFragmentLength) {
-        filtered.push_back(pos);
-      }
-    }
-
-    return filtered;
-  }
-
-  Language getLanguage() const override {
-    return Language::ENGLISH;
-  }
-};
-
-/**
  * Factory function implementation
  */
 HyphenationStrategy* createHyphenationStrategy(Language language) {
   switch (language) {
+    case Language::BASIC:
+      return new ExistingHyphensOnly();
+    case Language::ENGLISH:
+      return new EnglishHyphenation();
     case Language::GERMAN:
       return new GermanHyphenationStrategy();
-    case Language::BASIC:
-      return new BasicHyphenation();
-    case Language::ENGLISH:
-      return new EnglishHyphenationStrategy();
     case Language::NONE:
     default:
       return new NoHyphenation();

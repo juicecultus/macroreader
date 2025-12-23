@@ -20,6 +20,7 @@ include_directories(
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/content
   ${CMAKE_SOURCE_DIR}/src/text
+  ${CMAKE_SOURCE_DIR}/src/text/hyphenation
   ${CMAKE_SOURCE_DIR}/src/rendering
   ${CMAKE_SOURCE_DIR}/src/core
   ${CMAKE_SOURCE_DIR}/src/resources
@@ -47,6 +48,7 @@ target_include_directories(microreader_core PUBLIC
   ${CMAKE_SOURCE_DIR}/test/mocks
   ${CMAKE_SOURCE_DIR}/test/common
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/text/hyphenation
 )
 
 # Ensure fonts and other resource headers are found

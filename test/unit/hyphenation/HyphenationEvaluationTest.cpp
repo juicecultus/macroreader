@@ -7,8 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "text/hyphenation/EnglishHyphenation.h"
-#include "text/hyphenation/GermanHyphenation.h"
+#include "text/hyphenation/HyphenationStrategy.h"
 
 struct TestCase {
   std::string word;
@@ -115,6 +114,13 @@ EvaluationResult evaluateWord(const TestCase& testCase,
 
   if (result.precision + result.recall > 0) {
     result.f1Score = 2 * result.precision * result.recall / (result.precision + result.recall);
+  }
+
+  // Treat the case where there are no expected hyphens and none predicted as a perfect match
+  if (expected.empty() && actual.empty()) {
+    result.precision = 1.0;
+    result.recall = 1.0;
+    result.f1Score = 1.0;
   }
 
   double fpPenalty = 2.0;
@@ -232,16 +238,29 @@ int main(int argc, char* argv[]) {
     std::string testDataFile;
     std::function<std::vector<size_t>(const std::string&)> hyphenateFunc;
 
+    // Use the HyphenationStrategy factory to obtain the proper strategy for the language
+    HyphenationStrategy* strategy = nullptr;
+
     if (lang == "english") {
       testDataFile = "test/resources/english_hyphenation_tests.txt";
-      hyphenateFunc = EnglishHyphenation::hyphenate;
+      strategy = createHyphenationStrategy(Language::ENGLISH);
+      std::cerr << "[Eval] using text patterns for english" << std::endl;
     } else if (lang == "german") {
       testDataFile = "test/resources/german_hyphenation_tests.txt";
-      hyphenateFunc = GermanHyphenation::hyphenate;
+      strategy = createHyphenationStrategy(Language::GERMAN);
+      std::cerr << "[Eval] hyphenator assigned: strategy GERMAN" << std::endl;
     } else {
       std::cerr << "Unknown language: " << lang << std::endl;
       continue;
     }
+
+    // Wrap into the hyphenate function used by the evaluator
+    hyphenateFunc = [strategy](const std::string& w) {
+      if (strategy) {
+        return strategy->hyphenate(w);
+      }
+      return std::vector<size_t>();
+    };
 
     std::cout << "Loading test data from: " << testDataFile << std::endl;
     std::vector<TestCase> testCases = loadTestData(testDataFile);
