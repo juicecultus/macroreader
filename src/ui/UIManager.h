@@ -17,13 +17,14 @@ class SDCardManager;
 class FileBrowserScreen;
 class ImageViewerScreen;
 class TextViewerScreen;
+class SettingsScreen;
 
 class Settings;
 
 class UIManager {
  public:
   // Typed screen identifiers so callers don't use raw indices
-  enum class ScreenId { FileBrowser, ImageViewer, TextViewer };
+  enum class ScreenId { FileBrowser, ImageViewer, TextViewer, Settings };
 
   static constexpr size_t kScreenCount = 3;
 

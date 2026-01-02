@@ -7,6 +7,7 @@
 #include "resources/images/bebop_image.h"
 #include "ui/screens/FileBrowserScreen.h"
 #include "ui/screens/ImageViewerScreen.h"
+#include "ui/screens/SettingsScreen.h"
 #include "ui/screens/TextViewerScreen.h"
 
 UIManager::UIManager(EInkDisplay& display, SDCardManager& sdManager)
@@ -20,6 +21,7 @@ UIManager::UIManager(EInkDisplay& display, SDCardManager& sdManager)
       std::unique_ptr<Screen>(new ImageViewerScreen(display, *this));
   screens[toIndex(ScreenId::TextViewer)] =
       std::unique_ptr<Screen>(new TextViewerScreen(display, textRenderer, sdManager, *this));
+  screens[ScreenId::Settings] = std::unique_ptr<Screen>(new SettingsScreen(display, textRenderer, *this));
   Serial.printf("[%lu] UIManager: Constructor called\n", millis());
 }
 
@@ -46,7 +48,7 @@ void UIManager::begin() {
   if (sdManager.ready() && settings) {
     int saved = 0;
     if (settings->getInt(String("ui.screen"), saved)) {
-      if (saved >= 0 && saved <= static_cast<int>(ScreenId::TextViewer)) {
+      if (saved >= 0 && saved <= static_cast<int>(ScreenId::Settings)) {
         currentScreen = static_cast<ScreenId>(saved);
         Serial.printf("[%lu] UIManager: Restored screen %d from settings\n", millis(), saved);
       } else {
