@@ -54,6 +54,7 @@ class UIManager {
   TextRenderer textRenderer;
 
   ScreenId currentScreen = ScreenId::FileBrowser;
+  ScreenId previousScreen = ScreenId::FileBrowser;
 
   // Fixed-size owning pointers to screens. Avoids unordered_map/rehash code paths
   // that can crash on ESP32-C3.
@@ -65,6 +66,18 @@ class UIManager {
  public:
   Settings& getSettings() {
     return *settings;
+  }
+
+  Screen* getScreen(ScreenId id) {
+    auto it = screens.find(id);
+    if (it != screens.end()) {
+      return it->second.get();
+    }
+    return nullptr;
+  }
+
+  ScreenId getPreviousScreen() const {
+    return previousScreen;
   }
 };
 
