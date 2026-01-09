@@ -105,7 +105,6 @@ bool ImageDecoder::decodeToBW(const char* path, uint8_t* outBuffer, uint16_t tar
 int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
     DecodeContext *ctx = (DecodeContext *)pDraw->pUser;
     
-    // Simple dither/threshold to BW
     for (int y = 0; y < pDraw->iHeight; y++) {
         int targetY = pDraw->y + y;
         if (targetY >= ctx->targetHeight) break;
@@ -115,18 +114,18 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
             if (targetX >= ctx->targetWidth) break;
 
             uint16_t pixel = pDraw->pPixels[y * pDraw->iWidth + x];
-            // Extract RGB565 components
+            
+            // Extract RGB565 components (Big Endian from JPEGDEC)
             uint8_t r = (pixel >> 11) & 0x1F;
             uint8_t g = (pixel >> 5) & 0x3F;
             uint8_t b = pixel & 0x1F;
             
-            // Luminance (approximate)
-            uint8_t lum = (r << 3) * 0.299 + (g << 2) * 0.587 + (b << 3) * 0.114;
+            // Luminance (Standard coefficients)
+            uint8_t lum = (uint8_t)((r * 8 * 0.299f) + (g * 4 * 0.587f) + (b * 8 * 0.114f));
             
             if (lum < 128) {
-                // Black pixel (0 in E-Ink usually means black, but check buffer format)
-                // Actually our buffer is 1-bit, usually 0 is black, 1 is white.
-                int byteIdx = (targetY * ctx->targetWidth + targetX) / 8;
+                // Black pixel: bit is 0 in bb_epaper/microreader format
+                int byteIdx = (targetY * ((ctx->targetWidth + 7) / 8)) + (targetX / 8);
                 int bitIdx = 7 - (targetX % 8);
                 ctx->outBuffer[byteIdx] &= ~(1 << bitIdx);
             }
@@ -137,7 +136,7 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
 
 void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
     DecodeContext *ctx = (DecodeContext *)pDraw->pUser;
-    uint16_t usPixels[800]; // Temporary line buffer
+    uint16_t usPixels[800]; 
     
     if (!currentPNG) return;
     
@@ -156,10 +155,10 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
         uint8_t b = pixel & 0x1F;
         
         // Luminance calculation
-        uint8_t lum = (r << 3) * 0.299 + (g << 2) * 0.587 + (b << 3) * 0.114;
+        uint8_t lum = (uint8_t)((r * 8 * 0.299f) + (g * 4 * 0.587f) + (b * 8 * 0.114f));
 
         if (lum < 128) {
-            int byteIdx = (targetY * ctx->targetWidth + targetX) / 8;
+            int byteIdx = (targetY * ((ctx->targetWidth + 7) / 8)) + (targetX / 8);
             int bitIdx = 7 - (targetX % 8);
             ctx->outBuffer[byteIdx] &= ~(1 << bitIdx);
         }
