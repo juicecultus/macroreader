@@ -89,18 +89,20 @@ void UIManager::handleButtons(Buttons& buttons) {
 
 void UIManager::showSleepScreen() {
   Serial.printf("[%lu] Showing SLEEP screen\n", millis());
+  
+  // We need to be careful with double buffering. 
+  // clearScreen affects the current back buffer.
   display.clearScreen(0xFF);
 
   bool usedRandomCover = false;
   int randomSleepCover = 0;
   
-    if (settings && settings->getInt(String("settings.randomSleepCover"), randomSleepCover) && randomSleepCover != 0) {
+  if (settings && settings->getInt(String("settings.randomSleepCover"), randomSleepCover) && randomSleepCover != 0) {
     auto files = sdManager.listFiles("/images", 50);
     std::vector<String> images;
     for (const auto& f : files) {
       String lf = f;
       lf.toLowerCase();
-      // Filter out macOS metadata files which might be corrupted or invalid
       if (lf.startsWith("._")) continue;
       if (lf.endsWith(".jpg") || lf.endsWith(".jpeg") || lf.endsWith(".png")) {
         images.push_back(f);
@@ -108,13 +110,13 @@ void UIManager::showSleepScreen() {
     }
 
     if (!images.empty()) {
-      // Simple random selection
       srand(millis());
       int idx = rand() % images.size();
       String selected = String("/images/") + images[idx];
       Serial.printf("Selecting random sleep cover: %s\n", selected.c_str());
       
-      // Use BBEPAPER driver instance directly via EInkDisplay accessor
+      // decodeToDisplay writes directly to the buffer we pass it.
+      // We pass the current back buffer (which display.getFrameBuffer() returns).
       if (ImageDecoder::decodeToDisplay(selected.c_str(), display.getBBEPAPER(), display.getFrameBuffer(), EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT)) {
         usedRandomCover = true;
       } else {
@@ -124,11 +126,10 @@ void UIManager::showSleepScreen() {
   }
 
   if (!usedRandomCover) {
-    // Draw bebop image centered as fallback
     display.drawImage(bebop_image, 0, 0, BEBOP_IMAGE_WIDTH, BEBOP_IMAGE_HEIGHT, true);
   }
 
-  // Add "Sleeping..." text at the bottom
+  // Add "Sleeping..." text at the bottom (into the same back buffer)
   {
     textRenderer.setFrameBuffer(display.getFrameBuffer());
     textRenderer.setBitmapType(TextRenderer::BITMAP_BW);
@@ -145,14 +146,13 @@ void UIManager::showSleepScreen() {
     textRenderer.print(sleepText);
   }
 
-  // Final refresh to E-Ink hardware
+  // displayBuffer sends the back buffer to the controller AND swaps pointers.
+  // After this call, the buffer containing the image is now the "active" front buffer.
   display.displayBuffer(EInkDisplay::FULL_REFRESH);
   
-  // Re-copy back to ensure we have the image in the current front buffer
-  // after the internal swap. This ensures subsequent drawings (like Sleeping...)
-  // and the final display state are consistent.
-  // Actually, Sleeping... was already drawn into the buffer that just became the back buffer.
-  // Let's simplify: bypass the grayscale part for now if using random cover.
+  // Note: Since displayBuffer() calls swapBuffers(), any subsequent drawing 
+  // without another clearScreen/swap would happen on the old front buffer.
+  // But we are entering deep sleep, so this is the final state.
   
   if (!usedRandomCover && display.supportsGrayscale()) {
     display.copyGrayscaleBuffers(bebop_image_lsb, bebop_image_msb);
