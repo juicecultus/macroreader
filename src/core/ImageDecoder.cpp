@@ -23,15 +23,21 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t ta
     g_ctx = ctx;
 
     if (p.endsWith(".jpg") || p.endsWith(".jpeg")) {
-        JPEGDEC jpeg;
+        JPEGDEC* jpeg = new JPEGDEC();
+        if (!jpeg) {
+            delete ctx;
+            g_ctx = nullptr;
+            return false;
+        }
         File f = SD.open(path);
         if (!f) {
+            delete jpeg;
             delete ctx;
             g_ctx = nullptr;
             return false;
         }
 
-        int rc = jpeg.open((void *)&f, (int)f.size(), [](void *p) { /* close */ }, 
+        int rc = jpeg->open((void *)&f, (int)f.size(), [](void *p) { /* close */ }, 
                        [](JPEGFILE *pfn, uint8_t *pBuf, int32_t iLen) -> int32_t {
                            if (!pfn || !pfn->fHandle) return -1;
                            File *file = (File *)pfn->fHandle;
@@ -44,11 +50,11 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t ta
                        }, JPEGDraw);
 
         if (rc) {
-            jpeg.setPixelType(RGB565_LITTLE_ENDIAN);
-            jpeg.setUserPointer(ctx);
+            jpeg->setPixelType(RGB565_LITTLE_ENDIAN);
+            jpeg->setUserPointer(ctx);
             
-            int iw = jpeg.getWidth();
-            int ih = jpeg.getHeight();
+            int iw = jpeg->getWidth();
+            int ih = jpeg->getHeight();
             int scale = 0;
 
             if (iw > targetWidth * 4 || ih > targetHeight * 4) {
@@ -65,24 +71,31 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t ta
             ctx->offsetX = (targetWidth - iw) / 2;
             ctx->offsetY = (targetHeight - ih) / 2;
             
-            if (jpeg.decode(ctx->offsetX, ctx->offsetY, scale)) {
+            if (jpeg->decode(ctx->offsetX, ctx->offsetY, scale)) {
                 ctx->success = true;
             }
-            jpeg.close();
+            jpeg->close();
         }
         f.close();
+        delete jpeg;
     } else if (p.endsWith(".png")) {
-        PNG png;
-        currentPNG = &png;
+        PNG* png = new PNG();
+        if (!png) {
+            delete ctx;
+            g_ctx = nullptr;
+            return false;
+        }
+        currentPNG = png;
         File f = SD.open(path);
         if (!f) {
             currentPNG = nullptr;
+            delete png;
             delete ctx;
             g_ctx = nullptr;
             return false;
         }
         
-        int rc = png.open(path, [](const char *szFilename, int32_t *pFileSize) -> void * {
+        int rc = png->open(path, [](const char *szFilename, int32_t *pFileSize) -> void * {
             File *file = new File(SD.open(szFilename));
             if (file && *file) {
                 *pFileSize = (int32_t)file->size();
@@ -110,17 +123,18 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t ta
         });
         
         if (rc == PNG_SUCCESS) {
-            ctx->offsetX = (targetWidth - png.getWidth()) / 2;
-            ctx->offsetY = (targetHeight - png.getHeight()) / 2;
+            ctx->offsetX = (targetWidth - png->getWidth()) / 2;
+            ctx->offsetY = (targetHeight - png->getHeight()) / 2;
             
-            rc = png.decode(ctx, 0);
+            rc = png->decode(ctx, 0);
             if (rc == PNG_SUCCESS) {
                 ctx->success = true;
             }
-            png.close();
+            png->close();
         }
         f.close();
         currentPNG = nullptr;
+        delete png;
     }
 
     bool result = ctx->success;
@@ -137,26 +151,29 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
 
     for (int y = 0; y < pDraw->iHeight; y++) {
         int targetY = pDraw->y + y;
-        // BBEPAPER boundary check
-        if (targetY < 0 || targetY >= 480 || targetY >= ctx->targetHeight) continue;
+        // Strict hardware boundary check
+        if (targetY < 0 || targetY >= 480) continue;
 
         const uint16_t* pSrcRow = &pDraw->pPixels[y * pDraw->iWidth];
 
         for (int x = 0; x < pDraw->iWidth; x++) {
             int targetX = pDraw->x + x;
-            // BBEPAPER boundary check
-            if (targetX < 0 || targetX >= 800 || targetX >= ctx->targetWidth) continue;
+            // Strict hardware boundary check
+            if (targetX < 0 || targetX >= 800) continue;
 
             uint16_t pixel = pSrcRow[x];
+            // Extract RGB565 components
             uint8_t r = (pixel >> 11) & 0x1F; 
             uint8_t g = (pixel >> 5) & 0x3F;  
             uint8_t b = pixel & 0x1F;         
             
+            // Integer-only luminance calculation (0-255 scale)
             uint32_t r8 = (r * 255) / 31;
             uint32_t g8 = (g * 255) / 63;
             uint32_t b8 = (b * 255) / 31;
             uint32_t lum = (r8 * 306 + g8 * 601 + b8 * 117) >> 10;
             
+            // SSD1677: 0=black, 1=white (BBEPAPER mapping)
             uint8_t color = (lum < 128) ? 0 : 1;
             ctx->bbep->drawPixel(targetX, targetY, color);
         }
