@@ -149,7 +149,14 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
             uint8_t g = (pixel >> 5) & 0x3F;  
             uint8_t b = pixel & 0x1F;         
             
-            float lum = (r * 8.22f * 0.299f) + (g * 4.04f * 0.587f) + (b * 8.22f * 0.114f);
+            // Integer-only luminance calculation to avoid FPU context issues in callbacks
+            // Using coefficients scaled by 1024: R*306 + G*601 + B*117
+            // r is 5 bits (0-31), g is 6 bits (0-63), b is 5 bits (0-31)
+            // First scale them to 8 bits
+            uint32_t r8 = (r * 255) / 31;
+            uint32_t g8 = (g * 255) / 63;
+            uint32_t b8 = (b * 255) / 31;
+            uint32_t lum = (r8 * 306 + g8 * 601 + b8 * 117) >> 10;
             
             uint8_t color = (lum < 128) ? 0 : 1;
             ctx->bbep->drawPixel(targetX, targetY, color);
@@ -184,7 +191,10 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
         uint8_t g = (pixel >> 5) & 0x3F;  
         uint8_t b = pixel & 0x1F;         
         
-        float lum = (r * 8.22f * 0.299f) + (g * 4.04f * 0.587f) + (b * 8.22f * 0.114f);
+        uint32_t r8 = (r * 255) / 31;
+        uint32_t g8 = (g * 255) / 63;
+        uint32_t b8 = (b * 255) / 31;
+        uint32_t lum = (r8 * 306 + g8 * 601 + b8 * 117) >> 10;
 
         uint8_t color = (lum < 128) ? 0 : 1;
         ctx->bbep->drawPixel(targetX, targetY, color);
