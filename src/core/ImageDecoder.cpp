@@ -132,7 +132,8 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
             
             float lum = (r * 8.22f * 0.299f) + (g * 4.04f * 0.587f) + (b * 8.22f * 0.114f);
             
-            // bb_epaper: 0 = black, 1 = white
+            // SSD1677: 0xFF (1) is white, 0x00 (0) is black.
+            // BBEPAPER drawPixel uses 0 for black, 1 for white.
             uint8_t color = (lum < 128) ? 0 : 1;
             ctx->bbep->drawPixel(targetX, targetY, color);
         }
