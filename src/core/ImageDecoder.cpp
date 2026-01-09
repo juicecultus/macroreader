@@ -105,8 +105,8 @@ bool ImageDecoder::decodeToBW(const char* path, uint8_t* outBuffer, uint16_t tar
 int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
     DecodeContext *ctx = (DecodeContext *)pDraw->pUser;
     
-    // Bytes per line in the destination buffer (Width/8)
     const int destStride = (ctx->targetWidth + 7) / 8;
+    Serial.printf("JPEGDraw: x=%d, y=%d, w=%d, h=%d, destStride=%d\n", pDraw->x, pDraw->y, pDraw->iWidth, pDraw->iHeight, destStride);
 
     for (int y = 0; y < pDraw->iHeight; y++) {
         int targetY = pDraw->y + y;
@@ -119,21 +119,22 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
             uint16_t pixel = pDraw->pPixels[y * pDraw->iWidth + x];
             
             // Extract RGB565 components
-            uint8_t r = (pixel >> 11) & 0x1F; // 5 bits
-            uint8_t g = (pixel >> 5) & 0x3F;  // 6 bits
-            uint8_t b = pixel & 0x1F;         // 5 bits
+            uint8_t r = (pixel >> 11) & 0x1F; 
+            uint8_t g = (pixel >> 5) & 0x3F;  
+            uint8_t b = pixel & 0x1F;         
             
-            // Convert to 0-255 luminance
-            // r * 255/31 = 8.22
-            // g * 255/63 = 4.04
-            // b * 255/31 = 8.22
+            // Standard Luminance: 0.299R + 0.587G + 0.114B (scaled to 0-255)
             float lum = (r * 8.22f * 0.299f) + (g * 4.04f * 0.587f) + (b * 8.22f * 0.114f);
+            
+            int byteIdx = (targetY * destStride) + (targetX / 8);
+            int bitIdx = 7 - (targetX % 8);
             
             if (lum < 128) {
                 // Black pixel (0 in E-Ink)
-                int byteIdx = (targetY * destStride) + (targetX / 8);
-                int bitIdx = 7 - (targetX % 8);
                 ctx->outBuffer[byteIdx] &= ~(1 << bitIdx);
+            } else {
+                // White pixel (1 in E-Ink)
+                ctx->outBuffer[byteIdx] |= (1 << bitIdx);
             }
         }
     }
@@ -148,8 +149,8 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
     
     currentPNG->getLineAsRGB565(pDraw, usPixels, PNG_RGB565_LITTLE_ENDIAN, 0xffffffff);
 
-    // Bytes per line in the destination buffer (Width/8)
     const int destStride = (ctx->targetWidth + 7) / 8;
+    // Serial.printf("PNGDraw: y=%d, w=%d, destStride=%d\n", pDraw->y, pDraw->iWidth, destStride);
 
     int targetY = pDraw->y;
     if (targetY >= ctx->targetHeight) return;
@@ -159,17 +160,21 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
         if (targetX >= ctx->targetWidth) break;
 
         uint16_t pixel = usPixels[x];
-        uint8_t r = (pixel >> 11) & 0x1F; // 5 bits
-        uint8_t g = (pixel >> 5) & 0x3F;  // 6 bits
-        uint8_t b = pixel & 0x1F;         // 5 bits
+        uint8_t r = (pixel >> 11) & 0x1F; 
+        uint8_t g = (pixel >> 5) & 0x3F;  
+        uint8_t b = pixel & 0x1F;         
         
-        // Convert to 0-255 luminance
         float lum = (r * 8.22f * 0.299f) + (g * 4.04f * 0.587f) + (b * 8.22f * 0.114f);
 
+        int byteIdx = (targetY * destStride) + (targetX / 8);
+        int bitIdx = 7 - (targetX % 8);
+
         if (lum < 128) {
-            int byteIdx = (targetY * destStride) + (targetX / 8);
-            int bitIdx = 7 - (targetX % 8);
+            // Black pixel (0 in E-Ink)
             ctx->outBuffer[byteIdx] &= ~(1 << bitIdx);
+        } else {
+            // White pixel (1 in E-Ink)
+            ctx->outBuffer[byteIdx] |= (1 << bitIdx);
         }
     }
 }
