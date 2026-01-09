@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <resources/fonts/FontManager.h>
 
+#include <esp_system.h>
+
 #include "core/ImageDecoder.h"
 #include "core/Settings.h"
 #include "resources/images/bebop_image.h"
@@ -10,6 +12,8 @@
 #include "ui/screens/ImageViewerScreen.h"
 #include "ui/screens/SettingsScreen.h"
 #include "ui/screens/TextViewerScreen.h"
+
+RTC_DATA_ATTR static int32_t g_lastSleepCoverIndex = -1;
 
 UIManager::UIManager(EInkDisplay& display, SDCardManager& sdManager)
     : display(display), sdManager(sdManager), textRenderer(display) {
@@ -110,8 +114,15 @@ void UIManager::showSleepScreen() {
     }
 
     if (!images.empty()) {
-      srand(millis());
-      int idx = rand() % images.size();
+      uint32_t r = esp_random();
+      int idx = (int)(r % images.size());
+
+      // Avoid immediately repeating the same image across deep sleep cycles.
+      if ((int)images.size() > 1 && idx == g_lastSleepCoverIndex) {
+        idx = (idx + 1 + (int)((r >> 16) % (images.size() - 1))) % images.size();
+      }
+      g_lastSleepCoverIndex = idx;
+
       String selected = String("/images/") + images[idx];
       Serial.printf("Selecting random sleep cover: %s\n", selected.c_str());
       
