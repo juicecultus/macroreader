@@ -130,21 +130,6 @@ void UIManager::showSleepScreen() {
     display.drawImage(bebop_image, 0, 0, BEBOP_IMAGE_WIDTH, BEBOP_IMAGE_HEIGHT, true);
   }
 
-  // TEST: Draw a small black rectangle in the center to verify FB access
-  uint8_t* fb = display.getFrameBuffer();
-  if (fb) {
-    // Draw in portrait logical coordinates, then map to the 800x480 framebuffer.
-    for (int py = 300; py < 340; py++) {
-      for (int px = 220; px < 260; px++) {
-        int fx = py;            // x_fb = y_portrait
-        int fy = 479 - px;      // y_fb = (480-1) - x_portrait
-        int bIdx = (fy * 100) + (fx / 8);
-        int bit = 7 - (fx % 8);
-        fb[bIdx] &= ~(1 << bit); // Black
-      }
-    }
-  }
-
   // Add "Sleeping..." text at the bottom (into the same back buffer)
   {
     textRenderer.setFrameBuffer(display.getFrameBuffer());
