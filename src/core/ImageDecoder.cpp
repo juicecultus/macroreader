@@ -56,23 +56,40 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint8_t* fr
             jpeg->setPixelType(RGB565_LITTLE_ENDIAN);
             jpeg->setUserPointer(ctx);
             
-            int iw = jpeg->getWidth();
-            int ih = jpeg->getHeight();
-            int scale = 0;
+            const int srcW = jpeg->getWidth();
+            const int srcH = jpeg->getHeight();
 
-            if (iw > targetWidth * 4 || ih > targetHeight * 4) {
-                scale = JPEG_SCALE_EIGHTH;
-                iw >>= 3; ih >>= 3;
-            } else if (iw > targetWidth * 2 || ih > targetHeight * 2) {
-                scale = JPEG_SCALE_QUARTER;
-                iw >>= 2; ih >>= 2;
-            } else if (iw > targetWidth || ih > targetHeight) {
-                scale = JPEG_SCALE_HALF;
-                iw >>= 1; ih >>= 1;
+            // Full-screen "cover" strategy: choose the least downscale that still
+            // covers the target dimensions, then center-crop using negative offsets.
+            // NOTE: JPEGDEC can only downscale by powers of two.
+            struct ScaleOpt { int opt; int shift; };
+            const ScaleOpt opts[] = {
+                {0, 0},
+                {JPEG_SCALE_HALF, 1},
+                {JPEG_SCALE_QUARTER, 2},
+                {JPEG_SCALE_EIGHTH, 3},
+            };
+
+            int scale = 0;
+            int outW = srcW;
+            int outH = srcH;
+
+            // Default to the largest output (no downscale). Then see if we can
+            // downscale while still covering the screen.
+            for (size_t i = 0; i < (sizeof(opts) / sizeof(opts[0])); i++) {
+                const int w = srcW >> opts[i].shift;
+                const int h = srcH >> opts[i].shift;
+                if (w >= (int)targetWidth && h >= (int)targetHeight) {
+                    scale = opts[i].opt;
+                    outW = w;
+                    outH = h;
+                    break;
+                }
             }
 
-            ctx->offsetX = (targetWidth - iw) / 2;
-            ctx->offsetY = (targetHeight - ih) / 2;
+            // Center (or center-crop if outW/outH exceed target)
+            ctx->offsetX = ((int)targetWidth - outW) / 2;
+            ctx->offsetY = ((int)targetHeight - outH) / 2;
             
             jpeg->setMaxOutputSize(1); 
 
