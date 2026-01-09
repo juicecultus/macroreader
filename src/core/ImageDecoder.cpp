@@ -130,48 +130,41 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
     if (!pDraw || !pDraw->pUser) return 0;
     DecodeContext *ctx = (DecodeContext *)pDraw->pUser;
     
-    if (!ctx->bbep || !ctx->errorBuf) return 0;
-
-    // Boundary check for tile coordinates
-    if (pDraw->x < 0 || pDraw->y < 0) return 1;
+    if (!ctx->bbep || !ctx->errorBuf || !pDraw->pPixels) return 0;
 
     for (int y = 0; y < pDraw->iHeight; y++) {
         int targetY = pDraw->y + y;
         if (targetY >= ctx->targetHeight) break;
 
-        // Current and next error row pointers
         int16_t* curErr = &ctx->errorBuf[(targetY % 2) * ctx->targetWidth];
         int16_t* nxtErr = &ctx->errorBuf[((targetY + 1) % 2) * ctx->targetWidth];
         
-        // Clear next error row at start of its row
         if (pDraw->x == 0 && y == 0 && targetY < ctx->targetHeight - 1) {
             memset(nxtErr, 0, ctx->targetWidth * sizeof(int16_t));
         }
+
+        const uint16_t* pSrc = &pDraw->pPixels[y * pDraw->iWidth];
 
         for (int x = 0; x < pDraw->iWidth; x++) {
             int targetX = pDraw->x + x;
             if (targetX >= ctx->targetWidth) break;
 
-            if (!pDraw->pPixels) return 0; // Extreme safety
-            uint16_t pixel = pDraw->pPixels[y * pDraw->iWidth + x];
+            uint16_t pixel = pSrc[x];
             uint8_t r = (pixel >> 11) & 0x1F; 
             uint8_t g = (pixel >> 5) & 0x3F;  
             uint8_t b = pixel & 0x1F;         
             
             float lum = (r * 8.22f * 0.299f) + (g * 4.04f * 0.587f) + (b * 8.22f * 0.114f);
             
-            // Apply error from previous pixels
             int16_t gray = (int16_t)lum + curErr[targetX];
             if (gray < 0) gray = 0;
-            if (gray > 255) gray = 255;
+            else if (gray > 255) gray = 255;
 
             uint8_t color = (gray < 128) ? 0 : 1;
             ctx->bbep->drawPixel(targetX, targetY, color);
 
-            // Calculate error
             int16_t err = gray - (color ? 255 : 0);
 
-            // Distribute error (Floyd-Steinberg)
             if (targetX + 1 < ctx->targetWidth) curErr[targetX + 1] += (err * 7) / 16;
             if (targetY + 1 < ctx->targetHeight) {
                 if (targetX > 0) nxtErr[targetX - 1] += (err * 3) / 16;
