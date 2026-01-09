@@ -26,12 +26,6 @@ class UIManager {
   // Typed screen identifiers so callers don't use raw indices
   enum class ScreenId { FileBrowser, ImageViewer, TextViewer, Settings };
 
-  static constexpr size_t kScreenCount = 3;
-
-  static constexpr size_t toIndex(ScreenId id) {
-    return static_cast<size_t>(id);
-  }
-
   // Constructor
   UIManager(EInkDisplay& display, class SDCardManager& sdManager);
   ~UIManager();
