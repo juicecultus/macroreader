@@ -25,10 +25,12 @@ bool ImageDecoder::decodeToBW(const char* path, uint8_t* outBuffer, uint16_t tar
         // Use the simpler open() with callbacks to avoid linkage issues with File-based open
         int rc = jpeg.open((void *)&f, (int)f.size(), [](void *p) { /* close */ }, 
                        [](JPEGFILE *pfn, uint8_t *pBuf, int32_t iLen) -> int32_t {
-                           return ((File *)pfn->fHandle)->read(pBuf, iLen);
+                           if (!pfn->fHandle) return -1;
+                           return ((File *)pfn->fHandle)->read(pBuf, (size_t)iLen);
                        },
                        [](JPEGFILE *pfn, int32_t iPos) -> int32_t {
-                           return ((File *)pfn->fHandle)->seek(iPos);
+                           if (!pfn->fHandle) return -1;
+                           return ((File *)pfn->fHandle)->seek((uint32_t)iPos) ? iPos : -1;
                        }, JPEGDraw);
 
         if (rc) {
@@ -72,9 +74,11 @@ bool ImageDecoder::decodeToBW(const char* path, uint8_t* outBuffer, uint16_t tar
                 delete file;
             }
         }, [](PNGFILE *pfn, uint8_t *pBuffer, int32_t iLength) -> int32_t {
+            if (!pfn->fHandle) return -1;
             File *file = (File *)pfn->fHandle;
             return (int32_t)file->read(pBuffer, (size_t)iLength);
         }, [](PNGFILE *pfn, int32_t iPos) -> int32_t {
+            if (!pfn->fHandle) return -1;
             File *file = (File *)pfn->fHandle;
             return file->seek((uint32_t)iPos) ? iPos : -1;
         }, [](PNGDRAW *pDraw) -> int {
