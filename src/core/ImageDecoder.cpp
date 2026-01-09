@@ -42,6 +42,8 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t ta
                        }, JPEGDraw);
 
         if (rc) {
+            // Explicitly set pixel type to little-endian to avoid conversion issues
+            jpeg.setPixelType(RGB565_LITTLE_ENDIAN);
             jpeg.setUserPointer(ctx);
             
             int scale = 0;
@@ -127,29 +129,28 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t ta
 }
 
 int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
-    if (!pDraw || !pDraw->pUser) return 0;
-    DecodeContext *ctx = (DecodeContext *)pDraw->pUser;
+    if (!pDraw || !g_ctx || !pDraw->pPixels) return 0;
+    DecodeContext *ctx = g_ctx; 
     
-    if (!ctx->bbep || !pDraw->pPixels) return 0;
+    if (!ctx->bbep) return 0;
 
     for (int y = 0; y < pDraw->iHeight; y++) {
         int targetY = pDraw->y + y;
         if (targetY < 0 || targetY >= ctx->targetHeight) continue;
 
-        const uint16_t* pSrc = &pDraw->pPixels[y * pDraw->iWidth];
+        const uint16_t* pSrcRow = &pDraw->pPixels[y * pDraw->iWidth];
 
         for (int x = 0; x < pDraw->iWidth; x++) {
             int targetX = pDraw->x + x;
             if (targetX < 0 || targetX >= ctx->targetWidth) continue;
 
-            uint16_t pixel = pSrc[x];
+            uint16_t pixel = pSrcRow[x];
             uint8_t r = (pixel >> 11) & 0x1F; 
             uint8_t g = (pixel >> 5) & 0x3F;  
             uint8_t b = pixel & 0x1F;         
             
             float lum = (r * 8.22f * 0.299f) + (g * 4.04f * 0.587f) + (b * 8.22f * 0.114f);
             
-            // Temporary simple thresholding to eliminate dithering buffer as crash source
             uint8_t color = (lum < 128) ? 0 : 1;
             ctx->bbep->drawPixel(targetX, targetY, color);
         }
@@ -158,8 +159,8 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
 }
 
 void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
-    if (!pDraw || !pDraw->pUser) return;
-    DecodeContext *ctx = (DecodeContext *)pDraw->pUser;
+    if (!pDraw || !g_ctx) return;
+    DecodeContext *ctx = g_ctx; 
     
     if (!currentPNG || !ctx->bbep) return;
     
