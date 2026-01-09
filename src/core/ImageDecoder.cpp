@@ -127,8 +127,11 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t ta
 }
 
 int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
+    if (!pDraw || !pDraw->pUser) return 0;
     DecodeContext *ctx = (DecodeContext *)pDraw->pUser;
     
+    if (!ctx->bbep || !ctx->errorBuf) return 0;
+
     for (int y = 0; y < pDraw->iHeight; y++) {
         int targetY = pDraw->y + y;
         if (targetY < 0 || targetY >= ctx->targetHeight) continue;
@@ -136,8 +139,9 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
         // Current and next error row pointers
         int16_t* curErr = &ctx->errorBuf[(targetY % 2) * ctx->targetWidth];
         int16_t* nxtErr = &ctx->errorBuf[((targetY + 1) % 2) * ctx->targetWidth];
+        
         // Clear next error row at start of its row
-        if (y == 0 || (pDraw->x == 0 && targetY < ctx->targetHeight - 1)) {
+        if (pDraw->x == 0 && y == 0 && targetY < ctx->targetHeight - 1) {
             memset(nxtErr, 0, ctx->targetWidth * sizeof(int16_t));
         }
 
@@ -176,9 +180,10 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
 }
 
 void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
+    if (!pDraw || !pDraw->pUser) return;
     DecodeContext *ctx = (DecodeContext *)pDraw->pUser;
     
-    if (!currentPNG) return;
+    if (!currentPNG || !ctx->bbep || !ctx->errorBuf) return;
     
     // Allocate line buffer on heap to avoid stack overflow
     uint16_t* usPixels = (uint16_t*)malloc(pDraw->iWidth * sizeof(uint16_t));
@@ -194,7 +199,11 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
 
     int16_t* curErr = &ctx->errorBuf[(targetY % 2) * ctx->targetWidth];
     int16_t* nxtErr = &ctx->errorBuf[((targetY + 1) % 2) * ctx->targetWidth];
-    memset(nxtErr, 0, ctx->targetWidth * sizeof(int16_t));
+    
+    // PNGdec processes row by row, so we can clear the next error row safely here
+    if (targetY < ctx->targetHeight - 1) {
+        memset(nxtErr, 0, ctx->targetWidth * sizeof(int16_t));
+    }
 
     for (int x = 0; x < pDraw->iWidth; x++) {
         int targetX = x + ctx->offsetX;
