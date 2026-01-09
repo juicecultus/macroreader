@@ -62,9 +62,9 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint8_t* fr
             const int srcW = jpeg->getWidth();
             const int srcH = jpeg->getHeight();
 
-            // JPEGs on SD are expected to already be stored in portrait.
-            // Do not attempt EXIF-style rotation handling for JPEG.
-            ctx->rotateSource90 = false;
+            // If targeting portrait but the JPEG reports landscape dimensions,
+            // it is commonly an EXIF-rotated portrait photo. Rotate in draw callback.
+            ctx->rotateSource90 = (targetHeight > targetWidth) && (srcW > srcH);
 
             // "Fit" strategy: choose the least downscale that makes the decoded
             // image fit within the target dimensions, then center it (letterbox).
@@ -85,7 +85,9 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint8_t* fr
             for (size_t i = 0; i < (sizeof(opts) / sizeof(opts[0])); i++) {
                 const int w = srcW >> opts[i].shift;
                 const int h = srcH >> opts[i].shift;
-                if (w <= (int)targetWidth && h <= (int)targetHeight) {
+                const int visW = ctx->rotateSource90 ? h : w;
+                const int visH = ctx->rotateSource90 ? w : h;
+                if (visW <= (int)targetWidth && visH <= (int)targetHeight) {
                     scale = opts[i].opt;
                     outW = w;
                     outH = h;
@@ -96,16 +98,26 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint8_t* fr
             ctx->decodedWidth = (uint16_t)outW;
             ctx->decodedHeight = (uint16_t)outH;
 
+            const int visW = ctx->rotateSource90 ? outH : outW;
+            const int visH = ctx->rotateSource90 ? outW : outH;
+
             // Center (letterbox/pillarbox). Clamp to >= 0 to avoid accidental cropping.
-            ctx->offsetX = ((int)targetWidth - outW) / 2;
-            ctx->offsetY = ((int)targetHeight - outH) / 2;
+            ctx->offsetX = ((int)targetWidth - visW) / 2;
+            ctx->offsetY = ((int)targetHeight - visH) / 2;
             if (ctx->offsetX < 0) ctx->offsetX = 0;
             if (ctx->offsetY < 0) ctx->offsetY = 0;
             
             jpeg->setMaxOutputSize(1); 
 
-            Serial.printf("ImageDecoder: Decoding JPEG %dx%d to display at offset %d,%d scale %d\n", 
-                          jpeg->getWidth(), jpeg->getHeight(), ctx->offsetX, ctx->offsetY, scale);
+            Serial.printf(
+                "ImageDecoder: JPEG src=%dx%d target=%dx%d rotate90=%d scale=%d out=%dx%d vis=%dx%d offset=%d,%d\n",
+                srcW, srcH,
+                (int)targetWidth, (int)targetHeight,
+                ctx->rotateSource90 ? 1 : 0,
+                scale,
+                outW, outH,
+                visW, visH,
+                ctx->offsetX, ctx->offsetY);
 
             // Decode at origin; we apply offsets/rotation in the draw callback.
             if (jpeg->decode(0, 0, scale)) {
@@ -295,7 +307,7 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
     //   fx = py
     //   fy = 479 - px
     // This matches EInkDisplay::saveFrameBufferAsPBM() rotation.
-    // JPEGs on SD are expected to already be stored in portrait.
+    // If ctx->rotateSource90 is set, rotate source pixels to portrait first.
     for (int y = 0; y < pDraw->iHeight; y++) {
         const int sy = pDraw->y + y;
         if (sy < 0) continue;
@@ -306,8 +318,16 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
             const int sx = pDraw->x + x;
             if (sx < 0) continue;
 
-            const int px = ctx->offsetX + sx;
-            const int py = ctx->offsetY + sy;
+            int px;
+            int py;
+            if (ctx->rotateSource90) {
+                // Rotate 90deg CCW: (sx, sy) -> (sy, decodedW-1-sx)
+                px = ctx->offsetX + sy;
+                py = ctx->offsetY + ((int)ctx->decodedWidth - 1 - sx);
+            } else {
+                px = ctx->offsetX + sx;
+                py = ctx->offsetY + sy;
+            }
 
             if (px < 0 || px >= (int)ctx->targetWidth || py < 0 || py >= (int)ctx->targetHeight) continue;
 
