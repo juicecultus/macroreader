@@ -130,24 +130,17 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
     if (!pDraw || !pDraw->pUser) return 0;
     DecodeContext *ctx = (DecodeContext *)pDraw->pUser;
     
-    if (!ctx->bbep || !ctx->errorBuf || !pDraw->pPixels) return 0;
+    if (!ctx->bbep || !pDraw->pPixels) return 0;
 
     for (int y = 0; y < pDraw->iHeight; y++) {
         int targetY = pDraw->y + y;
-        if (targetY >= ctx->targetHeight) break;
-
-        int16_t* curErr = &ctx->errorBuf[(targetY % 2) * ctx->targetWidth];
-        int16_t* nxtErr = &ctx->errorBuf[((targetY + 1) % 2) * ctx->targetWidth];
-        
-        if (pDraw->x == 0 && y == 0 && targetY < ctx->targetHeight - 1) {
-            memset(nxtErr, 0, ctx->targetWidth * sizeof(int16_t));
-        }
+        if (targetY < 0 || targetY >= ctx->targetHeight) continue;
 
         const uint16_t* pSrc = &pDraw->pPixels[y * pDraw->iWidth];
 
         for (int x = 0; x < pDraw->iWidth; x++) {
             int targetX = pDraw->x + x;
-            if (targetX >= ctx->targetWidth) break;
+            if (targetX < 0 || targetX >= ctx->targetWidth) continue;
 
             uint16_t pixel = pSrc[x];
             uint8_t r = (pixel >> 11) & 0x1F; 
@@ -156,21 +149,9 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
             
             float lum = (r * 8.22f * 0.299f) + (g * 4.04f * 0.587f) + (b * 8.22f * 0.114f);
             
-            int16_t gray = (int16_t)lum + curErr[targetX];
-            if (gray < 0) gray = 0;
-            else if (gray > 255) gray = 255;
-
-            uint8_t color = (gray < 128) ? 0 : 1;
+            // Temporary simple thresholding to eliminate dithering buffer as crash source
+            uint8_t color = (lum < 128) ? 0 : 1;
             ctx->bbep->drawPixel(targetX, targetY, color);
-
-            int16_t err = gray - (color ? 255 : 0);
-
-            if (targetX + 1 < ctx->targetWidth) curErr[targetX + 1] += (err * 7) / 16;
-            if (targetY + 1 < ctx->targetHeight) {
-                if (targetX > 0) nxtErr[targetX - 1] += (err * 3) / 16;
-                nxtErr[targetX] += (err * 5) / 16;
-                if (targetX + 1 < ctx->targetWidth) nxtErr[targetX + 1] += (err * 1) / 16;
-            }
         }
     }
     return 1;
@@ -180,9 +161,8 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
     if (!pDraw || !pDraw->pUser) return;
     DecodeContext *ctx = (DecodeContext *)pDraw->pUser;
     
-    if (!currentPNG || !ctx->bbep || !ctx->errorBuf) return;
+    if (!currentPNG || !ctx->bbep) return;
     
-    // Allocate line buffer on heap to avoid stack overflow
     uint16_t* usPixels = (uint16_t*)malloc(pDraw->iWidth * sizeof(uint16_t));
     if (!usPixels) return;
     
@@ -192,14 +172,6 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
     if (targetY < 0 || targetY >= ctx->targetHeight) {
         free(usPixels);
         return;
-    }
-
-    int16_t* curErr = &ctx->errorBuf[(targetY % 2) * ctx->targetWidth];
-    int16_t* nxtErr = &ctx->errorBuf[((targetY + 1) % 2) * ctx->targetWidth];
-    
-    // PNGdec processes row by row, so we can clear the next error row safely here
-    if (targetY < ctx->targetHeight - 1) {
-        memset(nxtErr, 0, ctx->targetWidth * sizeof(int16_t));
     }
 
     for (int x = 0; x < pDraw->iWidth; x++) {
@@ -213,20 +185,8 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
         
         float lum = (r * 8.22f * 0.299f) + (g * 4.04f * 0.587f) + (b * 8.22f * 0.114f);
 
-        int16_t gray = (int16_t)lum + curErr[targetX];
-        if (gray < 0) gray = 0;
-        if (gray > 255) gray = 255;
-
-        uint8_t color = (gray < 128) ? 0 : 1;
+        uint8_t color = (lum < 128) ? 0 : 1;
         ctx->bbep->drawPixel(targetX, targetY, color);
-
-        int16_t err = gray - (color ? 255 : 0);
-        if (targetX + 1 < ctx->targetWidth) curErr[targetX + 1] += (err * 7) / 16;
-        if (targetY + 1 < ctx->targetHeight) {
-            if (targetX > 0) nxtErr[targetX - 1] += (err * 3) / 16;
-            nxtErr[targetX] += (err * 5) / 16;
-            if (targetX + 1 < ctx->targetWidth) nxtErr[targetX + 1] += (err * 1) / 16;
-        }
     }
     free(usPixels);
 }
