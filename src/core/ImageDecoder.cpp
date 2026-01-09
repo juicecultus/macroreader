@@ -169,18 +169,14 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
     if (!pDraw || !g_ctx || !pDraw->pPixels) return 0;
     DecodeContext *ctx = g_ctx; 
     
-    if (!ctx->bbep || !ctx->errorBuf) return 0;
+    if (!ctx->bbep) return 0;
 
+    // NOTE: JPEGDEC invokes this callback in MCU blocks, not strict scanlines.
+    // Error-diffusion dithering assumes left-to-right row order and causes heavy
+    // streaking/corruption when applied to block callbacks. Use simple thresholding.
     for (int y = 0; y < pDraw->iHeight; y++) {
         int targetY = pDraw->y + y;
         if (targetY < 0 || targetY >= 480) continue;
-
-        int16_t* curErr = &ctx->errorBuf[(targetY % 2) * 800];
-        int16_t* nxtErr = &ctx->errorBuf[((targetY + 1) % 2) * 800];
-        
-        if (pDraw->x == 0 && y == 0 && targetY < 479) {
-            memset(nxtErr, 0, 800 * sizeof(int16_t));
-        }
 
         const uint16_t* pSrcRow = pDraw->pPixels + (y * pDraw->iWidth);
 
@@ -189,21 +185,17 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
             if (targetX < 0 || targetX >= 800) continue;
 
             uint16_t pixel = pSrcRow[x];
-            uint8_t r = (pixel >> 11) & 0x1F; 
-            uint8_t g = (pixel >> 5) & 0x3F;  
-            uint8_t b = pixel & 0x1F;         
-            
+            uint8_t r = (pixel >> 11) & 0x1F;
+            uint8_t g = (pixel >> 5) & 0x3F;
+            uint8_t b = pixel & 0x1F;
+
             uint32_t r8 = (r * 255) / 31;
             uint32_t g8 = (g * 255) / 63;
             uint32_t b8 = (b * 255) / 31;
             uint32_t lum = (r8 * 306 + g8 * 601 + b8 * 117) >> 10;
 
-            int16_t gray = (int16_t)lum + curErr[targetX];
-            if (gray < 0) gray = 0;
-            else if (gray > 255) gray = 255;
+            uint8_t color = (lum < 128) ? 0 : 1;
 
-            uint8_t color = (gray < 128) ? 0 : 1;
-            
             if (ctx->frameBuffer) {
                 int byteIdx = (targetY * 100) + (targetX / 8);
                 int bitIdx = 7 - (targetX % 8);
@@ -214,14 +206,6 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
                 }
             } else {
                 ctx->bbep->drawPixel(targetX, targetY, color);
-            }
-
-            int16_t err = gray - (color ? 255 : 0);
-            if (targetX + 1 < 800) curErr[targetX + 1] += (err * 7) / 16;
-            if (targetY + 1 < 480) {
-                if (targetX > 0) nxtErr[targetX - 1] += (err * 3) / 16;
-                nxtErr[targetX] += (err * 5) / 16;
-                if (targetX + 1 < 800) nxtErr[targetX + 1] += (err * 1) / 16;
             }
         }
     }
