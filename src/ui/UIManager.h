@@ -44,10 +44,18 @@ class UIManager {
 
   bool clearEpubCache();
 
+  void setClockHM(int hour, int minute);
+  bool getClockHM(int& hourOut, int& minuteOut);
+  String getClockString();
+
  private:
   EInkDisplay& display;
   SDCardManager& sdManager;
   TextRenderer textRenderer;
+
+  bool clockValid = false;
+  int32_t clockBaseMinutes = 0;
+  uint32_t clockBaseMillis = 0;
 
   ScreenId currentScreen = ScreenId::FileBrowser;
   ScreenId previousScreen = ScreenId::FileBrowser;

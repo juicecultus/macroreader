@@ -78,6 +78,14 @@ void FileBrowserScreen::renderSdBrowser() {
     textRenderer.print(title);
   }
 
+  // Top-left clock
+  {
+    textRenderer.setFont(&MenuFontSmall);
+    String t = uiManager.getClockString();
+    textRenderer.setCursor(10, 35);
+    textRenderer.print(t);
+  }
+
   textRenderer.setFont(getMainFont());
 
   // Render file list centered both horizontally and vertically.

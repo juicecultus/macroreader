@@ -9,7 +9,7 @@ bool Settings::load() {
   if (!sd.ready())
     return false;
 
-  char buf[2048];
+  static char buf[8192];
   size_t r = sd.readFileToBuffer("/microreader/settings.cfg", buf, sizeof(buf));
   if (r == 0) {
     kv.clear();

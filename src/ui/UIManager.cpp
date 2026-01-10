@@ -42,6 +42,21 @@ void UIManager::begin() {
     if (settings)
       settings->load();
   }
+
+  // Restore soft clock (HH:MM) from consolidated settings
+  if (sdManager.ready() && settings) {
+    int h = -1;
+    int m = -1;
+    bool hasH = settings->getInt(String("clock.hour"), h);
+    bool hasM = settings->getInt(String("clock.minute"), m);
+    if (hasH && hasM) {
+      Serial.printf("[%lu] UIManager: Restored clock %02d:%02d from settings\n", millis(), h, m);
+      setClockHM(h, m);
+    } else {
+      Serial.printf("[%lu] UIManager: No clock in settings (hour=%d ok=%d, minute=%d ok=%d)\n", millis(), h, hasH ? 1 : 0,
+                    m, hasM ? 1 : 0);
+    }
+  }
   // Initialize screens using generic Screen interface
   for (auto const& [id, p] : screens) {
     if (p)
@@ -181,12 +196,62 @@ void UIManager::prepareForSleep() {
   if (sdManager.ready() && settings) {
     settings->setInt(String("ui.screen"), static_cast<int>(currentScreen));
     settings->setInt(String("ui.previousScreen"), static_cast<int>(previousScreen));
+
+    // Persist soft clock value (HH:MM)
+    int h = 0;
+    int m = 0;
+    if (getClockHM(h, m)) {
+      settings->setInt(String("clock.hour"), h);
+      settings->setInt(String("clock.minute"), m);
+    }
+
     if (!settings->save()) {
       Serial.println("UIManager: Failed to write settings.cfg to SD");
     }
   } else {
     Serial.println("UIManager: SD not ready; skipping save of current screen");
   }
+}
+
+void UIManager::setClockHM(int hour, int minute) {
+  if (hour < 0)
+    hour = 0;
+  if (hour > 23)
+    hour = 23;
+  if (minute < 0)
+    minute = 0;
+  if (minute > 59)
+    minute = 59;
+  clockBaseMinutes = (hour * 60) + minute;
+  clockBaseMillis = millis();
+  clockValid = true;
+}
+
+bool UIManager::getClockHM(int& hourOut, int& minuteOut) {
+  if (!clockValid) {
+    return false;
+  }
+  uint32_t now = millis();
+  uint32_t elapsedMs = now - clockBaseMillis;
+  int32_t addMinutes = (int32_t)(elapsedMs / 60000UL);
+  int32_t curMinutes = clockBaseMinutes + addMinutes;
+  curMinutes %= (24 * 60);
+  if (curMinutes < 0)
+    curMinutes += (24 * 60);
+  hourOut = (int)(curMinutes / 60);
+  minuteOut = (int)(curMinutes % 60);
+  return true;
+}
+
+String UIManager::getClockString() {
+  int h = 0;
+  int m = 0;
+  if (!getClockHM(h, m)) {
+    return String("--:--");
+  }
+  char buf[6];
+  snprintf(buf, sizeof(buf), "%02d:%02d", h, m);
+  return String(buf);
 }
 
 void UIManager::openTextFile(const String& sdPath) {
