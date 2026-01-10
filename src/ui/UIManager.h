@@ -18,13 +18,25 @@ class FileBrowserScreen;
 class ImageViewerScreen;
 class TextViewerScreen;
 class SettingsScreen;
+class WifiSettingsScreen;
+class WifiSsidSelectScreen;
+class WifiPasswordEntryScreen;
 
 class Settings;
 
 class UIManager {
  public:
   // Typed screen identifiers so callers don't use raw indices
-  enum class ScreenId { FileBrowser, ImageViewer, TextViewer, Settings };
+  enum class ScreenId {
+    FileBrowser,
+    ImageViewer,
+    TextViewer,
+    Settings,
+    WifiSettings,
+    WifiSsidSelect,
+    WifiPasswordEntry,
+    Count
+  };
 
   // Constructor
   UIManager(EInkDisplay& display, class SDCardManager& sdManager);

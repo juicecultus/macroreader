@@ -15,6 +15,9 @@
 #include "ui/screens/ImageViewerScreen.h"
 #include "ui/screens/SettingsScreen.h"
 #include "ui/screens/TextViewerScreen.h"
+#include "ui/screens/WifiPasswordEntryScreen.h"
+#include "ui/screens/WifiSettingsScreen.h"
+#include "ui/screens/WifiSsidSelectScreen.h"
 
 RTC_DATA_ATTR static int32_t g_lastSleepCoverIndex = -1;
 
@@ -30,6 +33,12 @@ UIManager::UIManager(EInkDisplay& display, SDCardManager& sdManager)
   screens[ScreenId::TextViewer] =
       std::unique_ptr<Screen>(new TextViewerScreen(display, textRenderer, sdManager, *this));
   screens[ScreenId::Settings] = std::unique_ptr<Screen>(new SettingsScreen(display, textRenderer, *this));
+  screens[ScreenId::WifiSettings] =
+      std::unique_ptr<Screen>(new WifiSettingsScreen(display, textRenderer, *this));
+  screens[ScreenId::WifiSsidSelect] =
+      std::unique_ptr<Screen>(new WifiSsidSelectScreen(display, textRenderer, *this));
+  screens[ScreenId::WifiPasswordEntry] =
+      std::unique_ptr<Screen>(new WifiPasswordEntryScreen(display, textRenderer, *this));
   Serial.printf("[%lu] UIManager: Constructor called\n", millis());
 }
 
@@ -76,7 +85,7 @@ void UIManager::begin() {
   if (sdManager.ready() && settings) {
     int saved = 0;
     if (settings->getInt(String("ui.screen"), saved)) {
-      if (saved >= 0 && saved <= static_cast<int>(ScreenId::Settings)) {
+      if (saved >= 0 && saved < static_cast<int>(ScreenId::Count)) {
         currentScreen = static_cast<ScreenId>(saved);
         Serial.printf("[%lu] UIManager: Restored screen %d from settings\n", millis(), saved);
       } else {
@@ -89,7 +98,7 @@ void UIManager::begin() {
     // Restore previous screen (will apply after showScreen)
     int prevSaved = 0;
     if (settings->getInt(String("ui.previousScreen"), prevSaved)) {
-      if (prevSaved >= 0 && prevSaved <= static_cast<int>(ScreenId::Settings)) {
+      if (prevSaved >= 0 && prevSaved < static_cast<int>(ScreenId::Count)) {
         savedPreviousScreen = static_cast<ScreenId>(prevSaved);
         Serial.printf("[%lu] UIManager: Restored previous screen %d from settings\n", millis(), prevSaved);
       }

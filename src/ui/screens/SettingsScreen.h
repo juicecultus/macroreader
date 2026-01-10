@@ -25,7 +25,7 @@ class SettingsScreen : public Screen {
 
   // Menu navigation
   int selectedIndex = 0;
-  static constexpr int SETTINGS_COUNT = 13;
+  static constexpr int SETTINGS_COUNT = 10;
 
   // Setting values and their current indices
   int marginIndex = 1;
@@ -38,18 +38,6 @@ class SettingsScreen : public Screen {
   int randomSleepCoverIndex = 0; // 0=OFF, 1=ON
 
   int clearCacheStatus = -1; // -1=idle, 0=fail, 1=ok
-
-  int wifiEnabledIndex = 0; // 0=OFF, 1=ON
-  int tzOffsetHours = 0;
-
-  String wifiSsid;
-  String wifiPass;
-
-  bool editingText = false;
-  int editingKey = 0; // 0=ssid, 1=pass
-  String editOriginal;
-  String editBuffer;
-  int editChoiceIndex = 0;
 
   // Available values for each setting
   static constexpr int marginValues[] = {5, 10, 15, 20, 25, 30};
