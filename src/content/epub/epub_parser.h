@@ -85,6 +85,12 @@ int epub_read_chunk(epub_stream_context* ctx, void* buffer, size_t max_size);
 /* End streaming and free context */
 void epub_end_streaming(epub_stream_context* ctx);
 
+/* Release any shared internal buffers used by the EPUB parser.
+ * On constrained devices, WiFi/TLS may need additional heap.
+ * Safe to call at any time; if a streaming context is active, buffers may be retained.
+ */
+void epub_release_shared_buffers(void);
+
 /* Get error string */
 const char* epub_get_error_string(epub_error error);
 

@@ -44,8 +44,25 @@ extern void arduino_log_memory(const char* msg);
 // Larger chunk sizes are automatically reduced to this cap.
 #define EPUB_STATIC_CHUNK_SIZE (2048)
 #define EPUB_STATIC_TOTAL_SIZE (sizeof(tinfl_decompressor) + EPUB_STATIC_CHUNK_SIZE + TINFL_LZ_DICT_SIZE)
-static uint8_t g_decomp_buffer[EPUB_STATIC_TOTAL_SIZE];
+static uint8_t* g_decomp_buffer = NULL;
+static size_t g_decomp_buffer_size = 0;
 static int g_decomp_buffer_in_use = 0;
+#endif
+
+#ifdef USE_ARDUINO_FILE
+void epub_release_shared_buffers(void) {
+  if (g_decomp_buffer_in_use) {
+    return;
+  }
+  if (g_decomp_buffer) {
+    free(g_decomp_buffer);
+    g_decomp_buffer = NULL;
+    g_decomp_buffer_size = 0;
+  }
+}
+#else
+void epub_release_shared_buffers(void) {
+}
 #endif
 
 /* File operation wrappers for Arduino compatibility */
@@ -495,6 +512,18 @@ epub_error epub_extract_streaming(epub_reader* reader, uint32_t file_index, epub
     if (total_size > EPUB_STATIC_TOTAL_SIZE) {
       return EPUB_ERROR_OUT_OF_MEMORY;
     }
+    if (!g_decomp_buffer || g_decomp_buffer_size < total_size) {
+      if (g_decomp_buffer) {
+        free(g_decomp_buffer);
+        g_decomp_buffer = NULL;
+        g_decomp_buffer_size = 0;
+      }
+      g_decomp_buffer = (uint8_t*)malloc(total_size);
+      if (!g_decomp_buffer) {
+        return EPUB_ERROR_OUT_OF_MEMORY;
+      }
+      g_decomp_buffer_size = total_size;
+    }
     memory_block = g_decomp_buffer;
 #else
     memory_block = (uint8_t*)malloc(total_size);
@@ -668,6 +697,19 @@ epub_stream_context* epub_start_streaming(epub_reader* reader, uint32_t file_ind
     if (g_decomp_buffer_in_use) {
       free(ctx);
       return NULL;
+    }
+    if (!g_decomp_buffer || g_decomp_buffer_size < total_size) {
+      if (g_decomp_buffer) {
+        free(g_decomp_buffer);
+        g_decomp_buffer = NULL;
+        g_decomp_buffer_size = 0;
+      }
+      g_decomp_buffer = (uint8_t*)malloc(total_size);
+      if (!g_decomp_buffer) {
+        free(ctx);
+        return NULL;
+      }
+      g_decomp_buffer_size = total_size;
     }
     ctx->memory_block = g_decomp_buffer;
     ctx->uses_shared_decomp_buffer = 1;

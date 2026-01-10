@@ -4,6 +4,8 @@
 #include <resources/fonts/FontManager.h>
 
 #include <WiFi.h>
+
+#include "../content/epub/epub_parser.h"
 #include <WiFiUdp.h>
 #include <time.h>
 #include <sys/time.h>
@@ -583,6 +585,10 @@ void UIManager::trySyncTimeFromNtp() {
   if (!sdManager.ready() || !settings) {
     return;
   }
+
+  // WiFi/TLS may require large contiguous allocations. Release shared EPUB
+  // decompression buffers to maximize available heap.
+  epub_release_shared_buffers();
 
   int wifiEnabled = 0;
   (void)settings->getInt(String("wifi.enabled"), wifiEnabled);
