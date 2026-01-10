@@ -740,13 +740,17 @@ bool ImageDecoder::decodeToDisplayFitWidth(const char* path, BBEPAPER* bbep, uin
             ctx->decodedWidth = (uint16_t)outW;
             ctx->decodedHeight = (uint16_t)outH;
 
-            const int visW = ctx->rotateSource90 ? outH : outW;
-            const int visH = ctx->rotateSource90 ? outW : outH;
-            ctx->renderWidth = (uint16_t)visW;
-            ctx->renderHeight = (uint16_t)visH;
+            const int srcVisW = ctx->rotateSource90 ? outH : outW;
+            const int srcVisH = ctx->rotateSource90 ? outW : outH;
 
-            ctx->offsetX = ((int)targetWidth - visW) / 2;
-            ctx->offsetY = ((int)targetHeight - visH) / 2;
+            const int outVisW = (int)targetWidth;
+            const int outVisH = (srcVisW > 0) ? (int)((((int64_t)srcVisH) * (int64_t)outVisW) / (int64_t)srcVisW) : 0;
+
+            ctx->renderWidth = (uint16_t)outVisW;
+            ctx->renderHeight = (uint16_t)outVisH;
+
+            ctx->offsetX = 0;
+            ctx->offsetY = ((int)targetHeight - outVisH) / 2;
 
             jpeg->setMaxOutputSize(1);
 
@@ -937,6 +941,11 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
     //   fy = 479 - px
     // This matches EInkDisplay::saveFrameBufferAsPBM() rotation.
     // If ctx->rotateSource90 is set, rotate source pixels to portrait first.
+    const int srcVisW = ctx->rotateSource90 ? (int)ctx->decodedHeight : (int)ctx->decodedWidth;
+    const int srcVisH = ctx->rotateSource90 ? (int)ctx->decodedWidth : (int)ctx->decodedHeight;
+    const int outVisW = (int)(ctx->scaleToWidth ? ctx->renderWidth : srcVisW);
+    const int outVisH = (int)(ctx->scaleToWidth ? ctx->renderHeight : srcVisH);
+
     for (int y = 0; y < pDraw->iHeight; y++) {
         const int sy = pDraw->y + y;
         if (sy < 0) continue;
@@ -947,22 +956,32 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
             const int sx = pDraw->x + x;
             if (sx < 0) continue;
 
-            int px;
-            int py;
+            int vx;
+            int vy;
             if (ctx->rotateSource90) {
-                // Rotate 90deg CCW: (sx, sy) -> (sy, decodedW-1-sx)
-                px = ctx->offsetX + sy;
-                py = ctx->offsetY + ((int)ctx->decodedWidth - 1 - sx);
+                vx = sy;
+                vy = ((int)ctx->decodedWidth - 1 - sx);
             } else {
-                px = ctx->offsetX + sx;
-                py = ctx->offsetY + sy;
+                vx = sx;
+                vy = sy;
             }
 
-            if (px < 0 || px >= (int)ctx->targetWidth || py < 0 || py >= (int)ctx->targetHeight) continue;
+            if (vx < 0 || vy < 0 || vx >= srcVisW || vy >= srcVisH) continue;
 
-            const int fx = py;
-            const int fy = 479 - px;
-            if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) continue;
+            int dx0 = vx;
+            int dx1 = vx;
+            int dy0 = vy;
+            int dy1 = vy;
+
+            if (ctx->scaleToWidth) {
+                if (srcVisW <= 0 || srcVisH <= 0 || outVisW <= 0 || outVisH <= 0) continue;
+                dx0 = (int)((((int64_t)vx) * (int64_t)outVisW) / (int64_t)srcVisW);
+                dx1 = (int)((((int64_t)(vx + 1)) * (int64_t)outVisW) / (int64_t)srcVisW) - 1;
+                dy0 = (int)((((int64_t)vy) * (int64_t)outVisH) / (int64_t)srcVisH);
+                dy1 = (int)((((int64_t)(vy + 1)) * (int64_t)outVisH) / (int64_t)srcVisH) - 1;
+                if (dx1 < dx0) dx1 = dx0;
+                if (dy1 < dy0) dy1 = dy0;
+            }
 
             uint16_t pixel = pSrcRow[x];
             uint8_t r = (pixel >> 11) & 0x1F;
@@ -976,16 +995,30 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
 
             uint8_t color = (lum < 128) ? 0 : 1;
 
-            if (ctx->frameBuffer) {
-                int byteIdx = (fy * 100) + (fx / 8);
-                int bitIdx = 7 - (fx % 8);
-                if (color == 0) {
-                    ctx->frameBuffer[byteIdx] &= ~(1 << bitIdx);
-                } else {
-                    ctx->frameBuffer[byteIdx] |= (1 << bitIdx);
+            for (int dy = dy0; dy <= dy1; ++dy) {
+                const int py = ctx->offsetY + dy;
+                if (py < 0 || py >= (int)ctx->targetHeight) continue;
+
+                for (int dx = dx0; dx <= dx1; ++dx) {
+                    const int px = ctx->offsetX + dx;
+                    if (px < 0 || px >= (int)ctx->targetWidth) continue;
+
+                    const int fx = py;
+                    const int fy = 479 - px;
+                    if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) continue;
+
+                    if (ctx->frameBuffer) {
+                        int byteIdx = (fy * 100) + (fx / 8);
+                        int bitIdx = 7 - (fx % 8);
+                        if (color == 0) {
+                            ctx->frameBuffer[byteIdx] &= ~(1 << bitIdx);
+                        } else {
+                            ctx->frameBuffer[byteIdx] |= (1 << bitIdx);
+                        }
+                    } else {
+                        ctx->bbep->drawPixel(fx, fy, color);
+                    }
                 }
-            } else {
-                ctx->bbep->drawPixel(fx, fy, color);
             }
         }
     }
