@@ -30,6 +30,8 @@ class WifiPasswordEntryScreen : public Screen {
   String editBuffer;
   int keyRow = 0;
   int keyCol = 0;
+  bool caps = false;
+  bool symbols = false;
 
   void loadSettings();
   void saveSettings();

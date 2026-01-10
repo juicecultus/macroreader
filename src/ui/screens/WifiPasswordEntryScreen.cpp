@@ -7,20 +7,66 @@
 #include "../../core/Settings.h"
 #include "../UIManager.h"
 
-static const char* kKeysRow0[] = {"OK", "DEL", "SPACE", "-", "_", ".", "@"};
-static const char* kKeysRow1[] = {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"};
-static const char* kKeysRow2[] = {"k", "l", "m", "n", "o", "p", "q", "r", "s", "t"};
-static const char* kKeysRow3[] = {"u", "v", "w", "x", "y", "z", "0", "1", "2", "3"};
-static const char* kKeysRow4[] = {"4", "5", "6", "7", "8", "9", "A", "B", "C", "D"};
-static const char* kKeysRow5[] = {"E", "F", "G", "H", "I", "J", "K", "L", "M", "N"};
-static const char* kKeysRow6[] = {"O", "P", "Q", "R", "S", "T", "U", "V", "W", "X"};
-static const char* kKeysRow7[] = {"Y", "Z"};
+static const int kKeyboardRowCount = 5;
+static const int kKeyboardCols = 10;
 
-static const char** kKeyboardRows[] = {
-    kKeysRow0, kKeysRow1, kKeysRow2, kKeysRow3, kKeysRow4, kKeysRow5, kKeysRow6, kKeysRow7,
+// Special "keys"; normal keys are just single printable chars.
+static const char kKeyOk = '\x01';
+static const char kKeyDel = '\x02';
+static const char kKeySpace = '\x03';
+static const char kKeyShift = '\x04';
+static const char kKeySym = '\x05';
+
+static const char kKeyboardAlpha[kKeyboardRowCount][kKeyboardCols] = {
+    // Row0: digits + symbols toggle at end
+    {'1', '2', '3', '4', '5', '6', '7', '8', '9', kKeySym},
+    // Row1
+    {'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'},
+    // Row2
+    {'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', kKeyDel},
+    // Row3
+    {kKeyShift, 'z', 'x', 'c', 'v', 'b', 'n', 'm', '-', '_'},
+    // Row4
+    {kKeyOk, kKeySpace, '.', '@', '/', '\\', ':', ';', ',', '!'},
 };
-static const int kKeyboardRowCounts[] = {7, 10, 10, 10, 10, 10, 10, 2};
-static const int kKeyboardRowCount = 8;
+
+// Symbols layout: keep digits top row, make rest punctuation-heavy.
+static const char kKeyboardSym[kKeyboardRowCount][kKeyboardCols] = {
+    {'1', '2', '3', '4', '5', '6', '7', '8', '9', kKeySym},
+    {'!', '@', '#', '$', '%', '^', '&', '*', '(', ')'},
+    {'-', '_', '=', '+', '[', ']', '{', '}', '\\', kKeyDel},
+    {kKeyShift, '<', '>', '?', '/', '|', '~', '`', '"', '\''},
+    {kKeyOk, kKeySpace, '.', ',', ':', ';', ' ', ' ', ' ', ' '},
+};
+
+static char getKeyAt(bool symbols, bool caps, int row, int col) {
+  if (row < 0 || row >= kKeyboardRowCount || col < 0 || col >= kKeyboardCols)
+    return 0;
+  char k = symbols ? kKeyboardSym[row][col] : kKeyboardAlpha[row][col];
+  if (!symbols && caps && k >= 'a' && k <= 'z') {
+    k = (char)('A' + (k - 'a'));
+  }
+  return k;
+}
+
+static const char* getKeyLabel(char key, bool symbols, bool caps) {
+  (void)symbols;
+  (void)caps;
+  switch (key) {
+    case kKeyOk:
+      return "OK";
+    case kKeyDel:
+      return "DEL";
+    case kKeySpace:
+      return "SPACE";
+    case kKeyShift:
+      return "SHIFT";
+    case kKeySym:
+      return "SYM";
+    default:
+      return nullptr;
+  }
+}
 
 WifiPasswordEntryScreen::WifiPasswordEntryScreen(EInkDisplay& display, TextRenderer& renderer, UIManager& uiManager)
     : display(display), textRenderer(renderer), uiManager(uiManager) {}
@@ -35,6 +81,8 @@ void WifiPasswordEntryScreen::activate() {
   editBuffer = wifiPass;
   keyRow = 1;
   keyCol = 0;
+  caps = false;
+  symbols = false;
 }
 
 void WifiPasswordEntryScreen::handleButtons(Buttons& buttons) {
@@ -42,32 +90,24 @@ void WifiPasswordEntryScreen::handleButtons(Buttons& buttons) {
     editBuffer = editOriginal;
     uiManager.showScreen(UIManager::ScreenId::WifiSettings);
   } else if (buttons.isPressed(Buttons::LEFT)) {
-    int cols = kKeyboardRowCounts[keyRow];
     keyCol++;
-    if (keyCol >= cols)
+    if (keyCol >= kKeyboardCols)
       keyCol = 0;
     show();
   } else if (buttons.isPressed(Buttons::RIGHT)) {
-    int cols = kKeyboardRowCounts[keyRow];
     keyCol--;
     if (keyCol < 0)
-      keyCol = cols - 1;
+      keyCol = kKeyboardCols - 1;
     show();
   } else if (buttons.isPressed(Buttons::VOLUME_UP)) {
     keyRow--;
     if (keyRow < 0)
       keyRow = kKeyboardRowCount - 1;
-    int cols = kKeyboardRowCounts[keyRow];
-    if (keyCol >= cols)
-      keyCol = cols - 1;
     show();
   } else if (buttons.isPressed(Buttons::VOLUME_DOWN)) {
     keyRow++;
     if (keyRow >= kKeyboardRowCount)
       keyRow = 0;
-    int cols = kKeyboardRowCounts[keyRow];
-    if (keyCol >= cols)
-      keyCol = cols - 1;
     show();
   } else if (buttons.isPressed(Buttons::CONFIRM)) {
     chooseKey();
@@ -93,18 +133,18 @@ void WifiPasswordEntryScreen::saveSettings() {
 }
 
 void WifiPasswordEntryScreen::chooseKey() {
-  const char* label = kKeyboardRows[keyRow][keyCol];
-  if (!label)
+  char key = getKeyAt(symbols, caps, keyRow, keyCol);
+  if (key == 0)
     return;
 
-  if (strcmp(label, "OK") == 0) {
+  if (key == kKeyOk) {
     wifiPass = editBuffer;
     saveSettings();
     uiManager.showScreen(UIManager::ScreenId::WifiSettings);
     return;
   }
 
-  if (strcmp(label, "DEL") == 0) {
+  if (key == kKeyDel) {
     if (editBuffer.length() > 0) {
       editBuffer.remove(editBuffer.length() - 1);
     }
@@ -112,7 +152,7 @@ void WifiPasswordEntryScreen::chooseKey() {
     return;
   }
 
-  if (strcmp(label, "SPACE") == 0) {
+  if (key == kKeySpace) {
     if (editBuffer.length() < 64) {
       editBuffer += ' ';
     }
@@ -120,9 +160,30 @@ void WifiPasswordEntryScreen::chooseKey() {
     return;
   }
 
-  // Regular key (single char)
-  if (strlen(label) == 1 && editBuffer.length() < 64) {
-    editBuffer += label[0];
+  if (key == kKeyShift) {
+    caps = !caps;
+    show();
+    return;
+  }
+
+  if (key == kKeySym) {
+    symbols = !symbols;
+    // When switching mode, keep cursor in bounds.
+    if (keyRow < 0)
+      keyRow = 0;
+    if (keyRow >= kKeyboardRowCount)
+      keyRow = kKeyboardRowCount - 1;
+    if (keyCol < 0)
+      keyCol = 0;
+    if (keyCol >= kKeyboardCols)
+      keyCol = kKeyboardCols - 1;
+    show();
+    return;
+  }
+
+  // Regular printable char
+  if (key >= 32 && key <= 126 && editBuffer.length() < 64) {
+    editBuffer += key;
   }
   show();
 }
@@ -171,13 +232,24 @@ void WifiPasswordEntryScreen::render() {
     const int cellH = 30;
 
     for (int r = 0; r < kKeyboardRowCount; ++r) {
-      int cols = kKeyboardRowCounts[r];
-      for (int c = 0; c < cols; ++c) {
-        const char* key = kKeyboardRows[r][c];
-        if (!key)
+      for (int c = 0; c < kKeyboardCols; ++c) {
+        char key = getKeyAt(symbols, caps, r, c);
+        if (key == 0)
           continue;
 
-        String label = String(key);
+        const char* special = getKeyLabel(key, symbols, caps);
+        String label;
+        if (special) {
+          label = String(special);
+        } else {
+          label = String((char)key);
+        }
+
+        // Don't render placeholder blanks in sym row4
+        if (key == ' ' && !(special && strcmp(special, "SPACE") == 0)) {
+          continue;
+        }
+
         if (r == keyRow && c == keyCol) {
           label = String(">") + label + String("<");
         }
