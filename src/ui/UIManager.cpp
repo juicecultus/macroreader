@@ -19,6 +19,8 @@
 #include "ui/screens/ImageViewerScreen.h"
 #include "ui/screens/SettingsScreen.h"
 #include "ui/screens/TextViewerScreen.h"
+#include "ui/screens/ClockSettingsScreen.h"
+#include "ui/screens/TimezoneSelectScreen.h"
 #include "ui/screens/WifiPasswordEntryScreen.h"
 #include "ui/screens/WifiSettingsScreen.h"
 #include "ui/screens/WifiSsidSelectScreen.h"
@@ -169,12 +171,16 @@ UIManager::UIManager(EInkDisplay& display, SDCardManager& sdManager)
   screens[ScreenId::TextViewer] =
       std::unique_ptr<Screen>(new TextViewerScreen(display, textRenderer, sdManager, *this));
   screens[ScreenId::Settings] = std::unique_ptr<Screen>(new SettingsScreen(display, textRenderer, *this));
+  screens[ScreenId::ClockSettings] =
+      std::unique_ptr<Screen>(new ClockSettingsScreen(display, textRenderer, *this));
   screens[ScreenId::WifiSettings] =
       std::unique_ptr<Screen>(new WifiSettingsScreen(display, textRenderer, *this));
   screens[ScreenId::WifiSsidSelect] =
       std::unique_ptr<Screen>(new WifiSsidSelectScreen(display, textRenderer, *this));
   screens[ScreenId::WifiPasswordEntry] =
       std::unique_ptr<Screen>(new WifiPasswordEntryScreen(display, textRenderer, *this));
+  screens[ScreenId::TimezoneSelect] =
+      std::unique_ptr<Screen>(new TimezoneSelectScreen(display, textRenderer, *this));
   Serial.printf("[%lu] UIManager: Constructor called\n", millis());
 }
 
@@ -425,25 +431,20 @@ bool UIManager::getClockHM(int& hourOut, int& minuteOut) {
 }
 
 String UIManager::getClockString() {
-  if (ntpTimeValid) {
-    int h = 0;
-    int m = 0;
-    if (getClockHM(h, m)) {
-      char buf[6];
-      snprintf(buf, sizeof(buf), "%02d:%02d", h, m);
-      return String(buf);
-    }
-    ntpTimeValid = false;
+  if (!ntpTimeValid) {
+    return String("--:--");
   }
 
   int h = 0;
   int m = 0;
-  if (!getClockHM(h, m)) {
-    return String("--:--");
+  if (getClockHM(h, m)) {
+    char buf[6];
+    snprintf(buf, sizeof(buf), "%02d:%02d", h, m);
+    return String(buf);
   }
-  char buf[6];
-  snprintf(buf, sizeof(buf), "%02d:%02d", h, m);
-  return String(buf);
+
+  ntpTimeValid = false;
+  return String("--:--");
 }
 
 void UIManager::trySyncTimeFromNtp() {
@@ -543,6 +544,17 @@ void UIManager::trySyncTimeFromNtp() {
     setClockHM(hour, minute);
     ntpTimeValid = true;
     g_lastGoodEpochSec = epochSec;
+    if (sdManager.ready() && settings) {
+      settings->setInt(String("clock.hour"), hour);
+      settings->setInt(String("clock.minute"), minute);
+      settings->setInt(String("clock.lastEpoch"), (int)epochSec);
+      if (!settings->save()) {
+        Serial.println("UIManager: Failed to persist synced clock to settings.cfg");
+      }
+    }
+    if (currentScreen == ScreenId::FileBrowser) {
+      screens[currentScreen]->show();
+    }
     Serial.printf("UIManager: NTP time synced (epoch=%lld)\n", (long long)epochSec);
   } else {
     Serial.println("UIManager: NTP sync failed (invalid time)");
@@ -571,7 +583,11 @@ bool UIManager::clearEpubCache() {
 void UIManager::showScreen(ScreenId id) {
   // Directly show the requested screen (assumed present)
   if (id == ScreenId::Settings && currentScreen != ScreenId::Settings) {
-    settingsReturnScreen = currentScreen;
+    if (currentScreen != ScreenId::WifiSettings && currentScreen != ScreenId::WifiSsidSelect &&
+        currentScreen != ScreenId::WifiPasswordEntry && currentScreen != ScreenId::ClockSettings &&
+        currentScreen != ScreenId::TimezoneSelect) {
+      settingsReturnScreen = currentScreen;
+    }
   }
   previousScreen = currentScreen;
   currentScreen = id;

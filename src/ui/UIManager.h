@@ -21,6 +21,8 @@ class SettingsScreen;
 class WifiSettingsScreen;
 class WifiSsidSelectScreen;
 class WifiPasswordEntryScreen;
+class ClockSettingsScreen;
+class TimezoneSelectScreen;
 
 class Settings;
 
@@ -32,9 +34,11 @@ class UIManager {
     ImageViewer,
     TextViewer,
     Settings,
+    ClockSettings,
     WifiSettings,
     WifiSsidSelect,
     WifiPasswordEntry,
+    TimezoneSelect,
     Count
   };
 

@@ -25,17 +25,17 @@ class SettingsScreen : public Screen {
 
   // Menu navigation
   int selectedIndex = 0;
-  static constexpr int SETTINGS_COUNT = 10;
+  static constexpr int SETTINGS_COUNT = 11;
 
   // Setting values and their current indices
   int marginIndex = 1;
-  int lineHeightIndex = 1;
-  int alignmentIndex = 0;
-  int showChapterNumbersIndex = 0;
-  int fontFamilyIndex = 1;  // 0=NotoSans, 1=Bookerly
-  int fontSizeIndex = 0;    // 0=Small(26), 1=Medium(28), 2=Large(30)
-  int uiFontSizeIndex = 0;  // 0=Small(14), 1=Large(28)
-  int randomSleepCoverIndex = 0; // 0=OFF, 1=ON
+  int lineHeightIndex = 2;
+  int alignmentIndex = 3;
+  int showChapterNumbersIndex = 4;
+  int fontFamilyIndex = 5;  // 0=NotoSans, 1=Bookerly
+  int fontSizeIndex = 6;    // 0=Small(26), 1=Medium(28), 2=Large(30)
+  int uiFontSizeIndex = 7;  // 0=Small(14), 1=Large(28)
+  int randomSleepCoverIndex = 8; // 0=OFF, 1=ON
 
   int clearCacheStatus = -1; // -1=idle, 0=fail, 1=ok
 

@@ -1,5 +1,5 @@
-#ifndef WIFI_SETTINGS_SCREEN_H
-#define WIFI_SETTINGS_SCREEN_H
+#ifndef CLOCK_SETTINGS_SCREEN_H
+#define CLOCK_SETTINGS_SCREEN_H
 
 #include <Arduino.h>
 
@@ -10,9 +10,9 @@
 class Buttons;
 class UIManager;
 
-class WifiSettingsScreen : public Screen {
+class ClockSettingsScreen : public Screen {
  public:
-  WifiSettingsScreen(EInkDisplay& display, TextRenderer& renderer, UIManager& uiManager);
+  ClockSettingsScreen(EInkDisplay& display, TextRenderer& renderer, UIManager& uiManager);
 
   void begin() override;
   void handleButtons(Buttons& buttons) override;
@@ -27,14 +27,8 @@ class WifiSettingsScreen : public Screen {
 
   int selectedIndex = 0;
 
-  int wifiEnabledIndex = 0;
-  String wifiSsid;
-  String wifiPass;
+  static constexpr int ITEM_COUNT = 2;
 
-  static constexpr int ITEM_COUNT = 3;
-
-  void loadSettings();
-  void saveSettings();
   void render();
   void selectNext();
   void selectPrev();

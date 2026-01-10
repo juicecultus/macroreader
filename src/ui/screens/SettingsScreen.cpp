@@ -157,12 +157,17 @@ void SettingsScreen::toggleCurrentSetting() {
     case 7:  // Random Sleep Cover
       randomSleepCoverIndex = 1 - randomSleepCoverIndex;
       break;
-    case 8:  // WiFi Setup
+    case 8:  // Clock
+      saveSettings();
+      uiManager.showScreen(UIManager::ScreenId::ClockSettings);
+      return;
+      break;
+    case 9:  // WiFi Setup
       saveSettings();
       uiManager.showScreen(UIManager::ScreenId::WifiSettings);
       return;
       break;
-    case 9:  // Clear Cache
+    case 10:  // Clear Cache
       clearCacheStatus = uiManager.clearEpubCache() ? 1 : 0;
       break;
   }
@@ -272,8 +277,10 @@ String SettingsScreen::getSettingName(int index) {
     case 7:
       return "Random Sleep Cover";
     case 8:
-      return "WiFi";
+      return "Clock";
     case 9:
+      return "WiFi";
+    case 10:
       return "Clear Cache";
     default:
       return "";
@@ -326,6 +333,8 @@ String SettingsScreen::getSettingValue(int index) {
     case 8:
       return "Setup";
     case 9:
+      return "Setup";
+    case 10:
       if (clearCacheStatus < 0)
         return "";
       return clearCacheStatus ? "OK" : "FAIL";
