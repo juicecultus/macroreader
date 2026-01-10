@@ -320,10 +320,17 @@ void UIManager::showSleepScreen() {
     }
     if (coverPath.length() > 0 && SD.exists(coverPath.c_str())) {
       Serial.printf("Selecting book cover sleep screen: %s\n", coverPath.c_str());
-      if (ImageDecoder::decodeToDisplayFitWidth(coverPath.c_str(), display.getBBEPAPER(), display.getFrameBuffer(), 480, 800)) {
-        usedRandomCover = true;
+      // JPEG/PNG decode can allocate internally and may throw/abort under low memory.
+      // If heap is low, skip cover decode and fall back to the built-in sleep image.
+      const uint32_t freeHeap = ESP.getFreeHeap();
+      if (freeHeap < 60000) {
+        Serial.printf("Skipping book cover sleep screen decode due to low heap (Free=%u)\n", (unsigned)freeHeap);
       } else {
-        Serial.println("Failed to decode book cover sleep screen");
+        if (ImageDecoder::decodeToDisplayFitWidth(coverPath.c_str(), display.getBBEPAPER(), display.getFrameBuffer(), 480, 800)) {
+          usedRandomCover = true;
+        } else {
+          Serial.println("Failed to decode book cover sleep screen");
+        }
       }
     }
   } else if (sleepMode == 1) {
