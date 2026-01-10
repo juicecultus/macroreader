@@ -218,3 +218,97 @@ bool SDCardManager::ensureDirectoryExists(const char* path) {
     return false;
   }
 }
+
+bool SDCardManager::removeRecursive(const char* path) {
+  if (!initialized) {
+    Serial.println("SDCardManager: not initialized; cannot remove");
+    return false;
+  }
+  if (!path || path[0] == '\0') {
+    return false;
+  }
+  if (!SD.exists(path)) {
+    return true;
+  }
+
+  File f = SD.open(path);
+  if (!f) {
+    Serial.printf("SDCardManager: removeRecursive failed to open: %s\n", path);
+    return false;
+  }
+
+  if (!f.isDirectory()) {
+    f.close();
+    return SD.remove(path);
+  }
+
+  for (File child = f.openNextFile(); child; child = f.openNextFile()) {
+    String childName = String(child.name());
+    child.close();
+
+    String childPath;
+    if (childName.startsWith("/")) {
+      childPath = childName;
+    } else if (String(path) == String("/")) {
+      childPath = String("/") + childName;
+    } else {
+      childPath = String(path) + String("/") + childName;
+    }
+
+    if (!removeRecursive(childPath.c_str())) {
+      f.close();
+      return false;
+    }
+  }
+
+  f.close();
+  return SD.rmdir(path);
+}
+
+bool SDCardManager::clearEpubExtractCache() {
+  if (!initialized) {
+    Serial.println("SDCardManager: not initialized; cannot clear cache");
+    return false;
+  }
+
+  const char* rootPath = "/microreader";
+  if (!SD.exists(rootPath)) {
+    return true;
+  }
+
+  File root = SD.open(rootPath);
+  if (!root || !root.isDirectory()) {
+    if (root)
+      root.close();
+    return false;
+  }
+
+  bool ok = true;
+  for (File entry = root.openNextFile(); entry; entry = root.openNextFile()) {
+    if (!entry.isDirectory()) {
+      entry.close();
+      continue;
+    }
+
+    String name = String(entry.name());
+    entry.close();
+
+    String lname = name;
+    lname.toLowerCase();
+
+    int lastSlash = lname.lastIndexOf('/');
+    String base = (lastSlash >= 0) ? lname.substring(lastSlash + 1) : lname;
+    if (!base.startsWith("epub_")) {
+      continue;
+    }
+
+    String dirPath = name.startsWith("/") ? name : (String(rootPath) + String("/") + name);
+    Serial.printf("SDCardManager: Removing EPUB cache dir %s\n", dirPath.c_str());
+    if (!removeRecursive(dirPath.c_str())) {
+      ok = false;
+    }
+  }
+
+  root.close();
+  return ok;
+}

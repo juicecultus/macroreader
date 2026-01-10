@@ -196,6 +196,13 @@ void UIManager::openTextFile(const String& sdPath) {
   showScreen(ScreenId::TextViewer);
 }
 
+bool UIManager::clearEpubCache() {
+  if (!sdManager.ready()) {
+    return false;
+  }
+  return sdManager.clearEpubExtractCache();
+}
+
 void UIManager::showScreen(ScreenId id) {
   // Directly show the requested screen (assumed present)
   previousScreen = currentScreen;

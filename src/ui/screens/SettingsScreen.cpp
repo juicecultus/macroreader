@@ -157,6 +157,9 @@ void SettingsScreen::toggleCurrentSetting() {
     case 7:  // Random Sleep Cover
       randomSleepCoverIndex = 1 - randomSleepCoverIndex;
       break;
+    case 8:  // Clear Cache
+      clearCacheStatus = uiManager.clearEpubCache() ? 1 : 0;
+      break;
   }
   saveSettings();
   show();
@@ -263,6 +266,8 @@ String SettingsScreen::getSettingName(int index) {
       return "UI Font Size";
     case 7:
       return "Random Sleep Cover";
+    case 8:
+      return "Clear Cache";
     default:
       return "";
   }
@@ -311,6 +316,10 @@ String SettingsScreen::getSettingValue(int index) {
       return uiFontSizeIndex ? "Large" : "Small";
     case 7:
       return randomSleepCoverIndex ? "On" : "Off";
+    case 8:
+      if (clearCacheStatus < 0)
+        return "";
+      return clearCacheStatus ? "OK" : "FAIL";
     default:
       return "";
   }

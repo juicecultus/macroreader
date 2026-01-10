@@ -42,6 +42,8 @@ class UIManager {
   // Open a text file (path on SD) in the text viewer and switch to that screen.
   void openTextFile(const String& sdPath);
 
+  bool clearEpubCache();
+
  private:
   EInkDisplay& display;
   SDCardManager& sdManager;

@@ -26,6 +26,9 @@ class SDCardManager {
   // Ensure a directory exists, creating it if necessary. Returns true on success.
   bool ensureDirectoryExists(const char* path);
 
+  bool removeRecursive(const char* path);
+  bool clearEpubExtractCache();
+
  private:
   uint8_t epd_sclk;
   uint8_t sd_miso;
