@@ -138,6 +138,7 @@ TextViewerScreen::TextViewerScreen(EInkDisplay& display, TextRenderer& renderer,
   layoutConfig.marginTop = 44;
   layoutConfig.marginBottom = 20;
   layoutConfig.lineHeight = 30;
+  layoutConfig.paragraphSpacing = 12;
   layoutConfig.minSpaceWidth = 8;
   layoutConfig.pageWidth = 480;
   layoutConfig.pageHeight = 800;
@@ -219,6 +220,15 @@ void TextViewerScreen::loadSettingsFromFile() {
   int lineSpacing = 4;  // Default spacing
   if (s.getInt(String("settings.lineHeight"), lineSpacing)) {
     layoutConfig.lineHeight = baseFontHeight + lineSpacing;
+  }
+
+  // Paragraph spacing = extra gap between paragraphs (in addition to lineHeight).
+  // If unset, keep it proportional to lineHeight so it scales with font size.
+  int paragraphSpacing = layoutConfig.lineHeight / 2;
+  if (s.getInt(String("settings.paragraphSpacing"), paragraphSpacing)) {
+    layoutConfig.paragraphSpacing = paragraphSpacing;
+  } else {
+    layoutConfig.paragraphSpacing = layoutConfig.lineHeight / 2;
   }
 
   int alignment = 0;

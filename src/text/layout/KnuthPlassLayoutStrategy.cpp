@@ -63,6 +63,10 @@ LayoutStrategy::PageLayout KnuthPlassLayoutStrategy::layoutText(WordProvider& pr
       }
     }
 
+    if (isParagraphEnd && lineCount > 0) {
+      y += config.paragraphSpacing;
+    }
+
     if (!words.empty()) {
       // Calculate line breaks using Knuth-Plass algorithm
       std::vector<size_t> breaks = calculateBreaks(words, maxWidth);

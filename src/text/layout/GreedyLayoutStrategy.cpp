@@ -66,6 +66,9 @@ LayoutStrategy::PageLayout GreedyLayoutStrategy::layoutText(WordProvider& provid
 
     result.lines.push_back(line);
     y += config.lineHeight;
+    if (isParagraphEnd && !line.words.empty()) {
+      y += config.paragraphSpacing;
+    }
   }
 
   result.endPosition = provider.getCurrentIndex();

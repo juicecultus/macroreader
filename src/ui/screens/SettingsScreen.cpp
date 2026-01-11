@@ -13,6 +13,7 @@
 
 constexpr int SettingsScreen::marginValues[];
 constexpr int SettingsScreen::lineHeightValues[];
+constexpr int SettingsScreen::paragraphSpacingValues[];
 
 SettingsScreen::SettingsScreen(EInkDisplay& display, TextRenderer& renderer, UIManager& uiManager)
     : display(display), textRenderer(renderer), uiManager(uiManager) {}
@@ -126,57 +127,62 @@ void SettingsScreen::toggleCurrentSetting() {
       if (lineHeightIndex >= lineHeightValuesCount)
         lineHeightIndex = 0;
       break;
-    case 3:  // Alignment
+    case 3:  // Paragraph Spacing
+      paragraphSpacingIndex++;
+      if (paragraphSpacingIndex >= paragraphSpacingValuesCount)
+        paragraphSpacingIndex = 0;
+      break;
+    case 4:  // Alignment
       alignmentIndex++;
       if (alignmentIndex >= 3)
         alignmentIndex = 0;
       break;
-    case 4:  // Show Chapter Numbers
+    case 5:  // Show Chapter Numbers
       showChapterNumbersIndex = 1 - showChapterNumbersIndex;
       break;
-    case 5:  // Font Family
+    case 6:  // Font Family
       fontFamilyIndex++;
       if (fontFamilyIndex >= 2)
         fontFamilyIndex = 0;
       applyFontSettings();
       break;
-    case 6:  // Font Size
+    case 7:  // Font Size
       fontSizeIndex++;
       if (fontSizeIndex >= 3)
         fontSizeIndex = 0;
       applyFontSettings();
       break;
-    case 7:  // UI Font Size
+    case 8:  // UI Font Size
       uiFontSizeIndex = 1 - uiFontSizeIndex;
       applyUIFontSettings();
       break;
-    case 8:  // Sleep Screen
+    case 9:  // Sleep Screen
       sleepScreenModeIndex = 1 - sleepScreenModeIndex;
       break;
-    case 9:  // Orientation
+    case 10:  // Orientation
       orientationIndex++;
       if (orientationIndex >= 4)
         orientationIndex = 0;
       break;
-    case 10:  // Time to Sleep
+    case 11:  // Time to Sleep
       sleepTimeoutIndex++;
       if (sleepTimeoutIndex >= 5)
         sleepTimeoutIndex = 0;
       break;
-    case 11:  // Clock
+    case 12:  // Clock
       saveSettings();
       uiManager.showScreen(UIManager::ScreenId::ClockSettings);
       return;
       break;
-    case 12:  // WiFi Setup
+    case 13:  // WiFi Setup
       saveSettings();
       uiManager.showScreen(UIManager::ScreenId::WifiSettings);
       return;
       break;
-    case 13:  // Clear Cache
+    case 14:  // Clear Cache
       clearCacheStatus = uiManager.clearEpubCache() ? 1 : 0;
       break;
-    case 14:  // Startup
+    case 15:  // Startup
       startupBehaviorIndex = 1 - startupBehaviorIndex;
       break;
   }
@@ -204,6 +210,17 @@ void SettingsScreen::loadSettings() {
     for (int i = 0; i < lineHeightValuesCount; i++) {
       if (lineHeightValues[i] == lineHeight) {
         lineHeightIndex = i;
+        break;
+      }
+    }
+  }
+
+  // Load paragraph spacing
+  int paragraphSpacing = 12;
+  if (s.getInt(String("settings.paragraphSpacing"), paragraphSpacing)) {
+    for (int i = 0; i < paragraphSpacingValuesCount; i++) {
+      if (paragraphSpacingValues[i] == paragraphSpacing) {
+        paragraphSpacingIndex = i;
         break;
       }
     }
@@ -279,6 +296,7 @@ void SettingsScreen::saveSettings() {
 
   s.setInt(String("settings.margin"), marginValues[marginIndex]);
   s.setInt(String("settings.lineHeight"), lineHeightValues[lineHeightIndex]);
+  s.setInt(String("settings.paragraphSpacing"), paragraphSpacingValues[paragraphSpacingIndex]);
   s.setInt(String("settings.alignment"), alignmentIndex);
   s.setInt(String("settings.showChapterNumbers"), showChapterNumbersIndex);
   s.setInt(String("settings.fontFamily"), fontFamilyIndex);
@@ -303,28 +321,30 @@ String SettingsScreen::getSettingName(int index) {
     case 2:
       return "Line Height";
     case 3:
-      return "Alignment";
+      return "Paragraph Space";
     case 4:
-      return "Chapter Numbers";
+      return "Alignment";
     case 5:
-      return "Font Family";
+      return "Chapter Numbers";
     case 6:
-      return "Font Size";
+      return "Font Family";
     case 7:
-      return "UI Font Size";
+      return "Font Size";
     case 8:
-      return "Sleep Screen";
+      return "UI Font Size";
     case 9:
-      return "Orientation";
+      return "Sleep Screen";
     case 10:
-      return "Time to Sleep";
+      return "Orientation";
     case 11:
-      return "Clock";
+      return "Time to Sleep";
     case 12:
-      return "WiFi";
+      return "Clock";
     case 13:
-      return "Clear Cache";
+      return "WiFi";
     case 14:
+      return "Clear Cache";
+    case 15:
       return "Startup";
     default:
       return "";
@@ -340,6 +360,8 @@ String SettingsScreen::getSettingValue(int index) {
     case 2:
       return String(lineHeightValues[lineHeightIndex]);
     case 3:
+      return String(paragraphSpacingValues[paragraphSpacingIndex]);
+    case 4:
       switch (alignmentIndex) {
         case 0:
           return "Left";
@@ -350,9 +372,9 @@ String SettingsScreen::getSettingValue(int index) {
         default:
           return "Unknown";
       }
-    case 4:
-      return showChapterNumbersIndex ? "On" : "Off";
     case 5:
+      return showChapterNumbersIndex ? "On" : "Off";
+    case 6:
       switch (fontFamilyIndex) {
         case 0:
           return "NotoSans";
@@ -361,7 +383,7 @@ String SettingsScreen::getSettingValue(int index) {
         default:
           return "Unknown";
       }
-    case 6:
+    case 7:
       switch (fontSizeIndex) {
         case 0:
           return "Small";
@@ -372,11 +394,11 @@ String SettingsScreen::getSettingValue(int index) {
         default:
           return "Unknown";
       }
-    case 7:
-      return uiFontSizeIndex ? "Large" : "Small";
     case 8:
-      return sleepScreenModeIndex ? "SD Random" : "Book Cover";
+      return uiFontSizeIndex ? "Large" : "Small";
     case 9:
+      return sleepScreenModeIndex ? "SD Random" : "Book Cover";
+    case 10:
       switch (orientationIndex) {
         case 0:
           return "Portrait";
@@ -389,7 +411,7 @@ String SettingsScreen::getSettingValue(int index) {
         default:
           return "Portrait";
       }
-    case 10:
+    case 11:
       switch (sleepTimeoutIndex) {
         case 0:
           return "1 min";
@@ -404,15 +426,15 @@ String SettingsScreen::getSettingValue(int index) {
         default:
           return "10 min";
       }
-    case 11:
-      return "Setup";
     case 12:
       return "Setup";
     case 13:
+      return "Setup";
+    case 14:
       if (clearCacheStatus < 0)
         return "Press";
       return clearCacheStatus ? "OK" : "FAIL";
-    case 14:
+    case 15:
       return startupBehaviorIndex ? "Resume" : "Home";
     default:
       return "";

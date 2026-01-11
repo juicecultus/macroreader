@@ -25,11 +25,12 @@ class SettingsScreen : public Screen {
 
   // Menu navigation
   int selectedIndex = 0;
-  static constexpr int SETTINGS_COUNT = 15;
+  static constexpr int SETTINGS_COUNT = 16;
 
   // Setting values and their current indices
   int marginIndex = 1;
   int lineHeightIndex = 2;
+  int paragraphSpacingIndex = 2;
   int alignmentIndex = 3;
   int showChapterNumbersIndex = 4;
   int fontFamilyIndex = 5;  // 0=NotoSans, 1=Bookerly
@@ -54,6 +55,8 @@ class SettingsScreen : public Screen {
   static constexpr int marginValuesCount = 6;
   static constexpr int lineHeightValues[] = {0, 2, 4, 6, 8, 10};
   static constexpr int lineHeightValuesCount = 6;
+  static constexpr int paragraphSpacingValues[] = {0, 6, 12, 18, 24, 30};
+  static constexpr int paragraphSpacingValuesCount = 6;
   // Alignment: 0=LEFT, 1=CENTER, 2=RIGHT
   // showChapterNumbers: 0=OFF, 1=ON
 
