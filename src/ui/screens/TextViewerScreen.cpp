@@ -34,6 +34,19 @@ static uint32_t fnv1a32_tv(const char* s) {
   return h;
 }
 
+static inline bool getFrameBufferPixelBw_tv(const uint8_t* fb, int fx, int fy) {
+  // Returns true if pixel is white, false if black.
+  if (!fb) {
+    return true;
+  }
+  if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) {
+    return true;
+  }
+  const int byteIdx = (fy * 100) + (fx / 8);
+  const int bitIdx = 7 - (fx % 8);
+  return ((fb[byteIdx] >> bitIdx) & 1) != 0;
+}
+
 static bool writeBmp24TopDownFromFb(const char* path, const uint8_t* fb, uint16_t w, uint16_t h) {
   if (!path || !fb || w == 0 || h == 0) {
     return false;
@@ -85,14 +98,14 @@ static bool writeBmp24TopDownFromFb(const char* path, const uint8_t* fb, uint16_
   }
   memset(row, 0xFF, rowStride);
 
-  const uint32_t rowBytesFb = (uint32_t)((w + 7) / 8);
   for (uint16_t y = 0; y < h; ++y) {
     memset(row, 0xFF, rowStride);
-    const uint32_t fbRowStart = (uint32_t)y * rowBytesFb;
     for (uint16_t x = 0; x < w; ++x) {
-      const uint32_t fbByte = fbRowStart + (uint32_t)(x / 8);
-      const uint8_t fbBit = 7 - (uint8_t)(x % 8);
-      const bool isWhite = ((fb[fbByte] >> fbBit) & 1) != 0;
+      // The e-ink framebuffer is 800x480 (rotated). Map output (480x800)
+      // into framebuffer coordinates.
+      const int fx = (int)y;
+      const int fy = 479 - (int)x;
+      const bool isWhite = getFrameBufferPixelBw_tv(fb, fx, fy);
       const uint8_t v = isWhite ? 255 : 0;
       const uint32_t off = (uint32_t)x * 3u;
       row[off + 0] = v;
