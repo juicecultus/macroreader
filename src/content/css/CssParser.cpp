@@ -1,4 +1,5 @@
 #include "CssParser.h"
+
 #include <cmath>
 
 CssParser::CssParser() {}
@@ -272,7 +273,8 @@ void CssParser::parseRule(const String& selector, const String& properties) {
       }
 
       // Store style if it has any supported properties
-      if (style.hasTextAlign || style.hasFontStyle || style.hasFontWeight || style.hasTextIndent || style.hasMarginTop || style.hasMarginBottom) {
+      if (style.hasTextAlign || style.hasFontStyle || style.hasFontWeight || style.hasTextIndent ||
+          style.hasMarginTop || style.hasMarginBottom) {
         // Merge with existing style if present
         auto it = styleMap_.find(singleSelector);
         if (it != styleMap_.end()) {
@@ -396,9 +398,19 @@ int CssParser::parseMargin(const String& value) const {
     // todo: consider limiting number of new lines allowed, because the gaps can get a bit silly with some ePubs!
     v = v.substring(0, v.length() - 2);
     newLines = static_cast<int>(std::floor(atof(v.c_str())));
+  } else if (v.length() >= 1 && v.charAt(v.length() - 1) == '%') {
+    // Handle percentage: ~30 lines per page, so percentage/100 * 30 lines
+    v = v.substring(0, v.length() - 1);
+    float percentage = atof(v.c_str());
+    newLines = static_cast<int>(std::floor(percentage * 0.3f));
   }
 
-  return (newLines >= 0) ? newLines : 0;
+  // Limit to maximum of 2 lines
+  if (newLines > 2) {
+    newLines = 2;
+  }
+
+  return newLines > 0 ? newLines : 0;
 }
 
 // skipWhitespaceAndComments removed (used by parseString which was removed)
