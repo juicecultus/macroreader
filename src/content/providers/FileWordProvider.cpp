@@ -91,6 +91,14 @@ static bool tryGetStyleForward(char cmd, FontStyle* out) {
       if (out)
         *out = FontStyle::REGULAR;
       return true;
+    case 'O':
+      if (out)
+        *out = FontStyle::ITALIC;
+      return true;
+    case 'o':
+      if (out)
+        *out = FontStyle::REGULAR;
+      return true;
   }
   return false;
 }
@@ -128,6 +136,14 @@ static bool tryGetStyleBackward(char cmd, FontStyle* out) {
     case 'h':
       if (out)
         *out = FontStyle::HIDDEN;
+      return true;
+    case 'O':
+      if (out)
+        *out = FontStyle::REGULAR;
+      return true;
+    case 'o':
+      if (out)
+        *out = FontStyle::ITALIC;
       return true;
   }
   return false;

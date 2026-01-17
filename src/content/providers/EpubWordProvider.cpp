@@ -243,8 +243,9 @@ bool EpubWordProvider::convertXhtmlToTxt(const String& srcPath, String& outTxtPa
   return true;
 }
 
-void EpubWordProvider::writeParagraphStyleToken(String& writeBuffer, String& pendingTag, const String& pendingParagraphClasses,
-                                                const String& pendingInlineStyle, bool& paragraphClassesWritten,
+void EpubWordProvider::writeParagraphStyleToken(String& writeBuffer, String& pendingTag,
+                                                const String& pendingParagraphClasses, const String& pendingInlineStyle,
+                                                bool& paragraphClassesWritten,
                                                 std::vector<char>& paragraphStyleEmitted) {
   // If this is the beginning of a paragraph and styles haven't been written yet,
   // write the style token in front of the text line.
@@ -278,13 +279,13 @@ void EpubWordProvider::writeParagraphStyleToken(String& writeBuffer, String& pen
 
     if (combined.hasMarginTop) {
       for (int i = 0; i < combined.marginTop; ++i) {
-          writeBuffer += "\n";
+        writeBuffer += "\n";
       }
     }
 
     if (combined.hasMarginBottom) {
       for (int i = 0; i < combined.marginBottom; ++i) {
-          paragraphStyleEmitted.push_back('\n');
+        paragraphStyleEmitted.push_back('\n');
       }
     }
 
@@ -365,6 +366,7 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
 
   String buffer;                     // Output buffer
   std::vector<String> elementStack;  // Track nested elements
+  std::vector<bool> linkStack;       // Track if each element is a link with href
   // Track inline style element stack (store per-element flags in object state)
   std::vector<char> paragraphStyleEmitted;  // Track paragraph style tokens emitted (uppercase)
   String pendingParagraphClasses;           // CSS classes for current block
@@ -382,8 +384,21 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
       String name = parser.getName();
 
       // Track non-self-closing elements
+      bool isLinkWithHref = false;
       if (!parser.isEmptyElement()) {
         elementStack.push_back(name);
+        // Check if this is a link with href attribute
+        if (name == "a") {
+          String href = parser.getAttribute("href");
+          if (!href.isEmpty()) {
+            isLinkWithHref = true;
+            buffer += ' ';
+            buffer += '[';
+            buffer += (char)0x1B;  // ESC
+            buffer += 'O';         // Link open (italic style)
+          }
+        }
+        linkStack.push_back(isLinkWithHref);
       }
 
       // Block elements: add newline before if current line has content
@@ -450,6 +465,14 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
         closeInlineStyleElement(buffer);
       }
 
+      // Handle end of link elements - add closing bracket and reset style
+      if (name == "a" && !linkStack.empty() && linkStack.back()) {
+        buffer += (char)0x1B;  // ESC
+        buffer += 'o';         // Link close (reset style)
+        buffer += ']';
+        buffer += ' ';
+      }
+
       // Block elements: add newline if line had content OR had &nbsp;
       if (isBlockElement(name) || isHeaderElement(name)) {
         if (lineHasContent || lineHasNbsp) {
@@ -486,9 +509,12 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
         paragraphStyleEmitted.clear();
       }
 
-      // Pop from element stack
+      // Pop from element stack and link stack
       if (!elementStack.empty()) {
         elementStack.pop_back();
+      }
+      if (!linkStack.empty()) {
+        linkStack.pop_back();
       }
     }
 
