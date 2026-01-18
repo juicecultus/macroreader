@@ -1504,3 +1504,176 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw)
     }
     free(usPixels);
 }
+
+// Decode image to 4-bit grayscale buffer for FastEPD's native 16-level grayscale
+bool ImageDecoder::decodeTo4BitGrayscale(const char* path, uint8_t* gray4Buffer, uint16_t targetWidth, uint16_t targetHeight) {
+    if (!path || !gray4Buffer) return false;
+    
+    String lf = String(path);
+    lf.toLowerCase();
+    
+    const bool isJpeg = lf.endsWith(".jpg") || lf.endsWith(".jpeg");
+    const bool isPng = lf.endsWith(".png");
+    const bool isBmp = lf.endsWith(".bmp");
+    
+    if (!isJpeg && !isPng && !isBmp) {
+        Serial.printf("ImageDecoder::decodeTo4BitGrayscale: unsupported format %s\n", path);
+        return false;
+    }
+    
+    // Clear buffer to white (0xFF = two white pixels, each 0xF)
+    const size_t bufSize = ((size_t)targetWidth * targetHeight) / 2;
+    memset(gray4Buffer, 0xFF, bufSize);
+    
+    File file = SD.open(path);
+    if (!file) {
+        Serial.printf("ImageDecoder::decodeTo4BitGrayscale: failed to open %s\n", path);
+        return false;
+    }
+    
+    // Get file size
+    size_t fileSize = file.size();
+    
+    // Allocate file buffer
+    uint8_t* fileData = (uint8_t*)heap_caps_malloc(fileSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!fileData) {
+        fileData = (uint8_t*)malloc(fileSize);
+    }
+    if (!fileData) {
+        Serial.println("ImageDecoder::decodeTo4BitGrayscale: OOM for file buffer");
+        file.close();
+        return false;
+    }
+    
+    size_t bytesRead = file.read(fileData, fileSize);
+    file.close();
+    
+    if (bytesRead != fileSize) {
+        Serial.printf("ImageDecoder::decodeTo4BitGrayscale: short read %u/%u\n", (unsigned)bytesRead, (unsigned)fileSize);
+        free(fileData);
+        return false;
+    }
+    
+    bool success = false;
+    
+    if (isJpeg) {
+        JPEGDEC jpeg;
+        if (jpeg.openRAM(fileData, fileSize, [](JPEGDRAW* pDraw) -> int {
+            // Context: gray4Buffer, targetWidth, targetHeight stored in pDraw->pUser
+            struct Gray4Ctx {
+                uint8_t* buf;
+                uint16_t w, h;
+                int16_t offsetX, offsetY;
+                uint16_t imgW, imgH;
+            };
+            Gray4Ctx* ctx = (Gray4Ctx*)pDraw->pUser;
+            
+            for (int y = 0; y < pDraw->iHeight; y++) {
+                int py = pDraw->y + y + ctx->offsetY;
+                if (py < 0 || py >= ctx->h) continue;
+                
+                for (int x = 0; x < pDraw->iWidth; x++) {
+                    int px = pDraw->x + x + ctx->offsetX;
+                    if (px < 0 || px >= ctx->w) continue;
+                    
+                    uint16_t rgb565 = pDraw->pPixels[y * pDraw->iWidth + x];
+                    uint8_t r = ((rgb565 >> 11) & 0x1F) << 3;
+                    uint8_t g = ((rgb565 >> 5) & 0x3F) << 2;
+                    uint8_t b = (rgb565 & 0x1F) << 3;
+                    uint8_t lum = (uint8_t)((r * 77 + g * 150 + b * 29) >> 8);
+                    
+                    // Convert to 4-bit (0-15), where 0=black, 15=white
+                    uint8_t gray4 = lum >> 4;
+                    
+                    // Pack into buffer (2 pixels per byte, high nibble first)
+                    size_t idx = (size_t)py * ctx->w + px;
+                    size_t byteIdx = idx / 2;
+                    if (idx & 1) {
+                        ctx->buf[byteIdx] = (ctx->buf[byteIdx] & 0xF0) | gray4;
+                    } else {
+                        ctx->buf[byteIdx] = (ctx->buf[byteIdx] & 0x0F) | (gray4 << 4);
+                    }
+                }
+            }
+            return 1;
+        })) {
+            int imgW = jpeg.getWidth();
+            int imgH = jpeg.getHeight();
+            
+            // Calculate scale to fit width
+            int scale = 1;
+            while ((imgW / (scale + 1)) >= targetWidth && scale < 8) scale++;
+            
+            int scaledW = imgW / scale;
+            int scaledH = imgH / scale;
+            int offsetX = (targetWidth - scaledW) / 2;
+            int offsetY = (targetHeight - scaledH) / 2;
+            
+            struct Gray4Ctx {
+                uint8_t* buf;
+                uint16_t w, h;
+                int16_t offsetX, offsetY;
+                uint16_t imgW, imgH;
+            } ctx = { gray4Buffer, targetWidth, targetHeight, (int16_t)offsetX, (int16_t)offsetY, (uint16_t)scaledW, (uint16_t)scaledH };
+            
+            jpeg.setUserPointer(&ctx);
+            jpeg.setPixelType(RGB565_BIG_ENDIAN);
+            success = jpeg.decode(0, 0, scale == 1 ? 0 : (scale == 2 ? JPEG_SCALE_HALF : (scale <= 4 ? JPEG_SCALE_QUARTER : JPEG_SCALE_EIGHTH))) == 1;
+            jpeg.close();
+        }
+    } else if (isPng) {
+        // PNG 4-bit grayscale: use existing decode path and convert
+        // For simplicity, decode to 1-bit first then we'll handle it in the display
+        Serial.println("ImageDecoder::decodeTo4BitGrayscale: PNG not yet optimized for 4-bit, skipping");
+        success = false;
+    } else if (isBmp) {
+        // Simple BMP decode for 4-bit grayscale
+        if (fileSize > 54) {
+            uint8_t* hdr = fileData;
+            if (hdr[0] == 'B' && hdr[1] == 'M') {
+                uint32_t dataOffset = rd32le(hdr + 10);
+                int32_t imgW = rd32sle(hdr + 18);
+                int32_t imgH = rd32sle(hdr + 22);
+                uint16_t bpp = rd16le(hdr + 28);
+                bool bottomUp = imgH > 0;
+                if (imgH < 0) imgH = -imgH;
+                
+                int offsetX = (targetWidth - imgW) / 2;
+                int offsetY = (targetHeight - imgH) / 2;
+                
+                if (bpp == 24 || bpp == 32) {
+                    int rowBytes = ((imgW * bpp / 8) + 3) & ~3;
+                    for (int row = 0; row < imgH; row++) {
+                        int srcRow = bottomUp ? (imgH - 1 - row) : row;
+                        uint8_t* rowData = fileData + dataOffset + srcRow * rowBytes;
+                        int py = row + offsetY;
+                        if (py < 0 || py >= targetHeight) continue;
+                        
+                        for (int x = 0; x < imgW; x++) {
+                            int px = x + offsetX;
+                            if (px < 0 || px >= targetWidth) continue;
+                            
+                            uint8_t b = rowData[x * (bpp / 8) + 0];
+                            uint8_t g = rowData[x * (bpp / 8) + 1];
+                            uint8_t r = rowData[x * (bpp / 8) + 2];
+                            uint8_t lum = (uint8_t)((r * 77 + g * 150 + b * 29) >> 8);
+                            uint8_t gray4 = lum >> 4;
+                            
+                            size_t idx = (size_t)py * targetWidth + px;
+                            size_t byteIdx = idx / 2;
+                            if (idx & 1) {
+                                gray4Buffer[byteIdx] = (gray4Buffer[byteIdx] & 0xF0) | gray4;
+                            } else {
+                                gray4Buffer[byteIdx] = (gray4Buffer[byteIdx] & 0x0F) | (gray4 << 4);
+                            }
+                        }
+                    }
+                    success = true;
+                }
+            }
+        }
+    }
+    
+    free(fileData);
+    return success;
+}

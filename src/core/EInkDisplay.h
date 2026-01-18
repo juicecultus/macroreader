@@ -54,6 +54,11 @@ class EInkDisplay {
   void displayBuffer(RefreshMode mode = FAST_REFRESH);
   void displayGrayBuffer(bool turnOffScreen = false);
 
+  // Display a 4-bit grayscale image using FastEPD's native 16-level grayscale (Paper S3 only)
+  // gray4Buffer: packed 4-bit grayscale (2 pixels per byte, high nibble first)
+  // Buffer size should be (DISPLAY_WIDTH * DISPLAY_HEIGHT) / 2
+  void display4BitGrayscale(const uint8_t* gray4Buffer);
+
   void refreshDisplay(RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false);
 
   bool supportsGrayscale() const;

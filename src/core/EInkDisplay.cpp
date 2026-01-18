@@ -633,6 +633,55 @@ void EInkDisplay::displayBuffer(RefreshMode mode) {
 #endif
 }
 
+void EInkDisplay::display4BitGrayscale(const uint8_t* gray4Buffer) {
+#ifdef USE_M5UNIFIED
+  if (!gray4Buffer) return;
+  
+  // Paper S3: Use FastEPD's native 4-bit grayscale mode for best quality
+  Serial.printf("[%lu] display4BitGrayscale: switching to 4BPP mode\n", millis());
+  g_epd.setMode(BB_MODE_4BPP);
+  g_epd.fillScreen(0xF);  // Fill with white (15)
+  
+  // FastEPD in 4BPP mode: native resolution is 960x540 (landscape)
+  // Our portrait buffer: 540w x 960h, packed 2 pixels per byte
+  // FastEPD landscape: 960w x 540h
+  // Rotation: portrait (px, py) -> landscape (py, 539-px)
+  const int nativeW = 960;
+  const int nativeH = 540;
+  
+  for (int py = 0; py < DISPLAY_HEIGHT; py++) {
+    for (int px = 0; px < DISPLAY_WIDTH; px++) {
+      // Read from our portrait buffer (2 pixels per byte, high nibble first)
+      size_t idx = (size_t)py * DISPLAY_WIDTH + px;
+      size_t byteIdx = idx / 2;
+      uint8_t gray;
+      if (idx & 1) {
+        gray = gray4Buffer[byteIdx] & 0x0F;
+      } else {
+        gray = (gray4Buffer[byteIdx] >> 4) & 0x0F;
+      }
+      
+      // Map portrait (px, py) to FastEPD landscape coordinates
+      int fx = py;
+      int fy = (DISPLAY_WIDTH - 1) - px;
+      if (fx >= 0 && fx < nativeW && fy >= 0 && fy < nativeH) {
+        g_epd.drawPixel(fx, fy, gray);
+      }
+    }
+  }
+  
+  Serial.printf("[%lu] display4BitGrayscale: calling fullUpdate\n", millis());
+  g_epd.fullUpdate(CLEAR_SLOW, true, NULL);
+  g_epd.backupPlane();
+  
+  // Switch back to 1BPP mode for normal operation
+  g_epd.setMode(BB_MODE_1BPP);
+  Serial.printf("[%lu] display4BitGrayscale: done\n", millis());
+#else
+  (void)gray4Buffer;
+#endif
+}
+
 void EInkDisplay::displayGrayBuffer(bool turnOffScreen) {
 #ifdef USE_M5UNIFIED
   // Paper S3: FastEPD handles grayscale internally; no custom LUT needed.

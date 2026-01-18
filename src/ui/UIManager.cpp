@@ -639,6 +639,40 @@ void UIManager::showSleepScreen() {
     textRenderer.print(sleepText);
   }
 
+#ifdef USE_M5UNIFIED
+  // Paper S3: Use FastEPD's native 16-level grayscale for best quality
+  if (usedRandomCover && coverBmpPath.length() > 0) {
+    Serial.printf("[%lu] Sleep screen: attempting 4-bit grayscale decode for Paper S3\n", millis());
+    
+    // Allocate 4-bit grayscale buffer (2 pixels per byte)
+    const size_t gray4Size = ((size_t)EInkDisplay::DISPLAY_WIDTH * EInkDisplay::DISPLAY_HEIGHT) / 2;
+    uint8_t* gray4Buffer = (uint8_t*)heap_caps_malloc(gray4Size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!gray4Buffer) {
+      gray4Buffer = (uint8_t*)malloc(gray4Size);
+    }
+    
+    if (gray4Buffer) {
+      sdManager.ensureSpiBusIdle();
+      if (ImageDecoder::decodeTo4BitGrayscale(coverBmpPath.c_str(), gray4Buffer, 
+                                               EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT)) {
+        Serial.printf("[%lu] Sleep screen: 4-bit grayscale decode success, displaying\n", millis());
+        display.display4BitGrayscale(gray4Buffer);
+      } else {
+        Serial.printf("[%lu] Sleep screen: 4-bit grayscale decode failed, falling back to BW\n", millis());
+        display.displayBuffer(EInkDisplay::FULL_REFRESH);
+      }
+      free(gray4Buffer);
+    } else {
+      Serial.printf("[%lu] Sleep screen: OOM for 4-bit buffer, falling back to BW\n", millis());
+      display.displayBuffer(EInkDisplay::FULL_REFRESH);
+    }
+  } else {
+    display.displayBuffer(EInkDisplay::FULL_REFRESH);
+  }
+  
+  free(decodedGrayLsb);
+  free(decodedGrayMsb);
+#else
   // displayBuffer sends the back buffer to the controller AND swaps pointers.
   // After this call, the buffer containing the image is now the "active" front buffer.
   display.displayBuffer(EInkDisplay::FULL_REFRESH);
@@ -793,6 +827,7 @@ void UIManager::showSleepScreen() {
 
   free(decodedGrayLsb);
   free(decodedGrayMsb);
+#endif
 }
 
 void UIManager::prepareForSleep() {

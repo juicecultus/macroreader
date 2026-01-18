@@ -56,6 +56,11 @@ public:
     static bool decodePlaneFitWidth(const char* path, uint8_t* planeBuffer, uint16_t targetWidth, uint16_t targetHeight,
                                     uint8_t planeMask);
 
+    // Decode image to 4-bit grayscale buffer (2 pixels per byte, high nibble first)
+    // Buffer size should be (targetWidth * targetHeight) / 2
+    // Returns grayscale values 0-15 (0=black, 15=white)
+    static bool decodeTo4BitGrayscale(const char* path, uint8_t* gray4Buffer, uint16_t targetWidth, uint16_t targetHeight);
+
 private:
     static bool decodeBMPToDisplay(const char* path, DecodeContext* ctx);
     static bool decodeBMPToPlaneFitWidth(const char* path, uint8_t* planeBuffer, uint16_t targetWidth, uint16_t targetHeight,
