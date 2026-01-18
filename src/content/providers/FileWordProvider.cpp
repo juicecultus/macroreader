@@ -192,7 +192,10 @@ char FileWordProvider::charAt(size_t pos) {
     return '\0';
   if (!ensureBufferForPos(pos))
     return '\0';
-  return (char)buf_[pos - bufStart_];
+  size_t bufOffset = pos - bufStart_;
+  if (bufOffset >= bufLen_)
+    return '\0';
+  return (char)buf_[bufOffset];
 }
 
 bool FileWordProvider::ensureBufferForPos(size_t pos) {

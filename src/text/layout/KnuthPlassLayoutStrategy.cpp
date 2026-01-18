@@ -22,6 +22,7 @@ KnuthPlassLayoutStrategy::~KnuthPlassLayoutStrategy() {}
 
 LayoutStrategy::PageLayout KnuthPlassLayoutStrategy::layoutText(WordProvider& provider, TextRenderer& renderer,
                                                                 const LayoutConfig& config) {
+  Serial.println("[KP] layoutText start");
   const int16_t maxWidth = config.pageWidth - config.marginLeft - config.marginRight;
 
   // Calculate vertical centering offset based on maximum line capacity
@@ -42,6 +43,7 @@ LayoutStrategy::PageLayout KnuthPlassLayoutStrategy::layoutText(WordProvider& pr
   PageLayout result;
   std::vector<ParagraphLayoutInfo> paragraphs;
   std::vector<LayoutStrategy::Word> words;
+  words.reserve(512);  // Pre-allocate to avoid reallocation during paragraph collection
 
   int startIndex = provider.getCurrentIndex();
   while (y < maxY) {
@@ -66,6 +68,7 @@ LayoutStrategy::PageLayout KnuthPlassLayoutStrategy::layoutText(WordProvider& pr
       }
 
       // iterate line by line until paragraph end
+      size_t wordsBefore = words.size();
       for (size_t i = 0; i < lineResult.words.size(); i++) {
         words.push_back(lineResult.words[i]);
       }

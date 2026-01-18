@@ -367,6 +367,7 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
   String buffer;                     // Output buffer
   std::vector<String> elementStack;  // Track nested elements
   std::vector<bool> linkStack;       // Track if each element is a link with href
+  char lastCharWritten = '\0';       // Track last char written (persists across buffer flushes)
   // Track inline style element stack (store per-element flags in object state)
   std::vector<char> paragraphStyleEmitted;  // Track paragraph style tokens emitted (uppercase)
   String pendingParagraphClasses;           // CSS classes for current block
@@ -393,12 +394,11 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
           String href = parser.getAttribute("href");
           if (!href.isEmpty()) {
             isLinkWithHref = true;
-            // Add space before link only if buffer doesn't already end with whitespace
-            if (buffer.length() > 0) {
-              char lastChar = buffer.charAt(buffer.length() - 1);
-              if (lastChar != ' ' && lastChar != '\n' && lastChar != '\t') {
-                buffer += ' ';
-              }
+            // Add space before link only if last written char is not whitespace
+            // Use lastCharWritten to handle case where buffer was flushed
+            if (lastCharWritten != '\0' && lastCharWritten != ' ' && lastCharWritten != '\n' &&
+                lastCharWritten != '\t') {
+              buffer += ' ';
             }
             buffer += (char)0x1B;  // ESC
             buffer += 'O';         // Link open (italic style)
@@ -412,6 +412,7 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
       // This ensures blockquotes, nested divs, etc. start on a new line
       if (isBlockElement(name) && lineHasContent) {
         buffer += "\n";
+        lastCharWritten = '\n';
         lineHasContent = false;
         lineHasNbsp = false;
         pendingLinkCloseSpace = false;  // Clear pending space at block boundaries
@@ -456,6 +457,7 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
             writtenInlineCombined_ = '\0';
           }
           buffer += "\n";
+          lastCharWritten = '\n';
           lineHasContent = false;
           lineHasNbsp = false;
           // Keep paragraphClassesWritten as false so alignment reopens on next line
@@ -500,6 +502,7 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
           }
 
           buffer += "\n";
+          lastCharWritten = '\n';
         }
         // Close any open inline styles at paragraph end to prevent carry-over between paragraphs
         // Use the *written* inline combination so we close whatever was actually emitted
@@ -583,10 +586,18 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
       // Append text
       buffer += text;
       lineHasContent = true;
+      // Track last character for space logic across buffer flushes
+      if (text.length() > 0) {
+        lastCharWritten = text.charAt(text.length() - 1);
+      }
     }
 
     // Periodic flush to avoid excessive memory use and ensure data hits SD
     if (buffer.length() > FLUSH_THRESHOLD) {
+      // Remember last char before clearing buffer for space logic
+      if (buffer.length() > 0) {
+        lastCharWritten = buffer.charAt(buffer.length() - 1);
+      }
       size_t toWrite = buffer.length();
       size_t written = out.write((const uint8_t*)buffer.c_str(), toWrite);
       if (outBytes)
@@ -1194,14 +1205,16 @@ bool EpubWordProvider::hasPrevWord() {
 }
 
 StyledWord EpubWordProvider::getNextWord() {
-  if (!fileProvider_)
+  if (!fileProvider_) {
     return StyledWord();
+  }
   return fileProvider_->getNextWord();
 }
 
 StyledWord EpubWordProvider::getPrevWord() {
-  if (!fileProvider_)
+  if (!fileProvider_) {
     return StyledWord();
+  }
   return fileProvider_->getPrevWord();
 }
 
