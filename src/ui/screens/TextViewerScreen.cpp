@@ -21,6 +21,27 @@
 #include "../../text/layout/KnuthPlassLayoutStrategy.h"
 #include "SettingsScreen.h"
 #include "core/ImageDecoder.h"
+#include "core/EInkDisplay.h"
+
+// Platform-aware framebuffer coordinate conversion (portrait logical -> physical)
+static inline bool portraitToFb_tv(int px, int py, int& outByteIdx, int& outBitIdx) {
+#ifdef USE_M5UNIFIED
+    // Paper S3: portrait framebuffer, no rotation
+    if (px < 0 || px >= (int)EInkDisplay::DISPLAY_WIDTH || py < 0 || py >= (int)EInkDisplay::DISPLAY_HEIGHT) return false;
+    const int widthBytes = (EInkDisplay::DISPLAY_WIDTH + 7) / 8;
+    outByteIdx = py * widthBytes + (px / 8);
+    outBitIdx = 7 - (px % 8);
+    return true;
+#else
+    // ESP32-C3: landscape 800x480 physical, rotate portrait logical
+    const int fx = py;
+    const int fy = 479 - px;
+    if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) return false;
+    outByteIdx = (fy * 100) + (fx / 8);
+    outBitIdx = 7 - (fx % 8);
+    return true;
+#endif
+}
 
 static uint32_t fnv1a32_tv(const char* s) {
   uint32_t h = 2166136261u;
@@ -34,28 +55,28 @@ static uint32_t fnv1a32_tv(const char* s) {
   return h;
 }
 
-static inline bool getFrameBufferPixelBw_tv(const uint8_t* fb, int fx, int fy) {
+static inline bool getFrameBufferPixelBw_tv(const uint8_t* fb, int px, int py) {
   // Returns true if pixel is white, false if black.
+  // px, py are portrait logical coordinates.
   if (!fb) {
     return true;
   }
-  if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) {
+  int byteIdx, bitIdx;
+  if (!portraitToFb_tv(px, py, byteIdx, bitIdx)) {
     return true;
   }
-  const int byteIdx = (fy * 100) + (fx / 8);
-  const int bitIdx = 7 - (fx % 8);
   return ((fb[byteIdx] >> bitIdx) & 1) != 0;
 }
 
-static inline bool getFrameBufferPixelBit_tv(const uint8_t* fb, int fx, int fy) {
+static inline bool getFrameBufferPixelBit_tv(const uint8_t* fb, int px, int py) {
+  // px, py are portrait logical coordinates.
   if (!fb) {
     return false;
   }
-  if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) {
+  int byteIdx, bitIdx;
+  if (!portraitToFb_tv(px, py, byteIdx, bitIdx)) {
     return false;
   }
-  const int byteIdx = (fy * 100) + (fx / 8);
-  const int bitIdx = 7 - (fx % 8);
   return ((fb[byteIdx] >> bitIdx) & 1) != 0;
 }
 
@@ -205,11 +226,9 @@ static bool writeBmp24TopDownFromFb(const char* path, const uint8_t* fb, uint16_
   for (uint16_t y = 0; y < h; ++y) {
     memset(row, 0xFF, rowStride);
     for (uint16_t x = 0; x < w; ++x) {
-      // The e-ink framebuffer is 800x480 (rotated). Map output (480x800)
-      // into framebuffer coordinates.
-      const int fx = (int)y;
-      const int fy = 479 - (int)x;
-      const bool isWhite = getFrameBufferPixelBw_tv(fb, fx, fy);
+      // Use portrait logical coordinates (x, y) directly.
+      // getFrameBufferPixelBw_tv handles platform-specific mapping.
+      const bool isWhite = getFrameBufferPixelBw_tv(fb, (int)x, (int)y);
       const uint8_t v = isWhite ? 255 : 0;
       const uint32_t off = (uint32_t)x * 3u;
       row[off + 0] = v;
@@ -243,8 +262,9 @@ static int16_t getFontMaxBottom_tv(const SimpleGFXfont* font) {
   return maxBottom;
 }
 
-static constexpr int16_t kFooterPaddingBottom_tv = 8;
-static constexpr int16_t kFooterGapAbove_tv = 14;
+static constexpr int16_t kFooterPaddingBottom_tv = 6;
+static constexpr int16_t kFooterGapAbove_tv = 10;
+static constexpr int16_t kFooterHeight_tv = 10;  // Approximate height of footer text
 
 TextViewerScreen::TextViewerScreen(EInkDisplay& display, TextRenderer& renderer, SDCardManager& sdManager,
                                    UIManager& uiManager)
@@ -262,8 +282,8 @@ TextViewerScreen::TextViewerScreen(EInkDisplay& display, TextRenderer& renderer,
   layoutConfig.lineHeight = 30;
   layoutConfig.paragraphSpacing = 12;
   layoutConfig.minSpaceWidth = 8;
-  layoutConfig.pageWidth = 480;
-  layoutConfig.pageHeight = 800;
+  layoutConfig.pageWidth = EInkDisplay::DISPLAY_WIDTH;
+  layoutConfig.pageHeight = EInkDisplay::DISPLAY_HEIGHT;
   layoutConfig.alignment = LayoutStrategy::ALIGN_LEFT;
   layoutConfig.language = Language::ENGLISH;  // Default to english hyphenation
 
@@ -300,15 +320,15 @@ void TextViewerScreen::loadSettingsFromFile() {
   Settings& s = uiManager.getSettings();
 
   // Apply reading orientation: update logical page dimensions for layout.
-  // 0=Portrait(480x800), 1=Landscape CW(800x480), 2=Inverted(480x800), 3=Landscape CCW(800x480)
+  // 0=Portrait, 1=Landscape CW, 2=Inverted, 3=Landscape CCW
   int orientation = 0;
   (void)s.getInt(String("settings.orientation"), orientation);
   if (orientation == 1 || orientation == 3) {
-    layoutConfig.pageWidth = 800;
-    layoutConfig.pageHeight = 480;
+    layoutConfig.pageWidth = EInkDisplay::DISPLAY_HEIGHT;
+    layoutConfig.pageHeight = EInkDisplay::DISPLAY_WIDTH;
   } else {
-    layoutConfig.pageWidth = 480;
-    layoutConfig.pageHeight = 800;
+    layoutConfig.pageWidth = EInkDisplay::DISPLAY_WIDTH;
+    layoutConfig.pageHeight = EInkDisplay::DISPLAY_HEIGHT;
   }
 
   // Apply layout config from Settings
@@ -364,8 +384,8 @@ void TextViewerScreen::loadSettingsFromFile() {
   }
 
   {
-    const int16_t footerMaxBottom = getFontMaxBottom_tv(&MenuFontSmall);
-    const int16_t footerReserve = footerMaxBottom + kFooterPaddingBottom_tv + kFooterGapAbove_tv;
+    // Reserve space for footer: gap above + footer height + padding below
+    const int16_t footerReserve = kFooterGapAbove_tv + kFooterHeight_tv + kFooterPaddingBottom_tv;
     if (layoutConfig.marginBottom < footerReserve) {
       layoutConfig.marginBottom = footerReserve;
     }
@@ -407,9 +427,9 @@ void TextViewerScreen::activate() {
       textRenderer.getTextBounds(l2, 0, 0, &x1, &y1, &w2, &h2);
       const int16_t lineGap = 8;
       int16_t totalH = (int16_t)h1 + lineGap + (int16_t)h2;
-      int16_t startY = (800 - totalH) / 2;
-      int16_t cx1 = (480 - (int)w1) / 2;
-      int16_t cx2 = (480 - (int)w2) / 2;
+      int16_t startY = ((int16_t)EInkDisplay::DISPLAY_HEIGHT - totalH) / 2;
+      int16_t cx1 = ((int16_t)EInkDisplay::DISPLAY_WIDTH - (int)w1) / 2;
+      int16_t cx2 = ((int16_t)EInkDisplay::DISPLAY_WIDTH - (int)w2) / 2;
       textRenderer.setCursor(cx1, startY);
       textRenderer.print(l1);
       textRenderer.setCursor(cx2, startY + (int16_t)h1 + lineGap);
@@ -477,19 +497,19 @@ void TextViewerScreen::handleButtons(Buttons& buttons) {
   } else if (buttons.isPressed(Buttons::CONFIRM)) {
     // Open settings
     uiManager.showScreen(UIManager::ScreenId::Settings);
-  } else if (buttons.isDown(Buttons::LEFT) || buttons.isDown(Buttons::VOLUME_UP)) {
-    uint8_t btn = buttons.isDown(Buttons::LEFT) ? Buttons::LEFT : Buttons::VOLUME_UP;
-    if (buttons.getHoldDuration(btn) >= LONG_PRESS_MS) {
-      jumpToPreviousChapter();
-    } else {
-      prevPage();
-    }
-  } else if (buttons.isDown(Buttons::RIGHT) || buttons.isDown(Buttons::VOLUME_DOWN)) {
-    uint8_t btn = buttons.isDown(Buttons::RIGHT) ? Buttons::RIGHT : Buttons::VOLUME_DOWN;
+  } else if (buttons.wasReleased(Buttons::LEFT) || buttons.wasReleased(Buttons::VOLUME_UP)) {
+    uint8_t btn = buttons.wasReleased(Buttons::LEFT) ? Buttons::LEFT : Buttons::VOLUME_UP;
     if (buttons.getHoldDuration(btn) >= LONG_PRESS_MS) {
       jumpToNextChapter();
     } else {
       nextPage();
+    }
+  } else if (buttons.wasReleased(Buttons::RIGHT) || buttons.wasReleased(Buttons::VOLUME_DOWN)) {
+    uint8_t btn = buttons.wasReleased(Buttons::RIGHT) ? Buttons::RIGHT : Buttons::VOLUME_DOWN;
+    if (buttons.getHoldDuration(btn) >= LONG_PRESS_MS) {
+      jumpToPreviousChapter();
+    } else {
+      prevPage();
     }
   }
 
@@ -640,8 +660,10 @@ void TextViewerScreen::showPage() {
     uint16_t w, h;
     textRenderer.getTextBounds(indicator.c_str(), 0, 0, &x1, &y1, &w, &h);
     int16_t centerX = (layoutConfig.pageWidth - (int)w) / 2;
-    const int16_t footerMaxBottom = getFontMaxBottom_tv(&MenuFontSmall);
-    int16_t indicatorY = layoutConfig.pageHeight - kFooterPaddingBottom_tv - footerMaxBottom;
+    // Position footer with padding from bottom edge
+    int16_t indicatorY = layoutConfig.pageHeight - kFooterPaddingBottom_tv - (int16_t)h;
+    Serial.printf("Footer: pageH=%d padding=%d h=%u -> Y=%d, centerX=%d, w=%u\n",
+                  layoutConfig.pageHeight, kFooterPaddingBottom_tv, h, indicatorY, centerX, w);
     textRenderer.setCursor(centerX, indicatorY);
     textRenderer.print(indicator);
   }
@@ -684,7 +706,10 @@ void TextViewerScreen::nextPage() {
     return;
 
   // Check if there are more words in current chapter (use chapter percentage, not book percentage)
-  if (provider->getChapterPercentage(pageEndIndex) < 10000) {
+  uint32_t chapterPct = provider->getChapterPercentage(pageEndIndex);
+  Serial.printf("nextPage: chapterPct=%u pageEndIndex=%d\n", (unsigned)chapterPct, pageEndIndex);
+  
+  if (chapterPct < 10000) {
     provider->setPosition(pageEndIndex);
     showPage();
   } else {
@@ -692,12 +717,17 @@ void TextViewerScreen::nextPage() {
     if (provider->hasChapters()) {
       int currentChapter = provider->getCurrentChapter();
       int chapterCount = provider->getChapterCount();
+      Serial.printf("nextPage: at end of chapter %d/%d, advancing...\n", currentChapter + 1, chapterCount);
       if (currentChapter + 1 < chapterCount) {
         provider->setChapter(currentChapter + 1);
         pageStartIndex = 0;
         pageEndIndex = 0;
         showPage();
+      } else {
+        Serial.println("nextPage: already at last chapter, no action");
       }
+    } else {
+      Serial.println("nextPage: no chapters, at end of document");
     }
   }
 }
@@ -869,7 +899,8 @@ void TextViewerScreen::openFile(const String& sdPath) {
       // Only do this if the extracted cover file already exists and heap is not fragmented.
       if (coverPath.length() > 0 && display.supportsGrayscale()) {
         const uint32_t freeHeap = ESP.getFreeHeap();
-        const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+        // Use MALLOC_CAP_INTERNAL to avoid walking 8MB PSRAM which triggers WDT on ESP32-S3
+        const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         Serial.printf("TextViewerScreen: cover cache probe Free=%u Largest=%u Path=%s\n", (unsigned)freeHeap,
                       (unsigned)largest, coverPath.c_str());
 
@@ -899,7 +930,7 @@ void TextViewerScreen::openFile(const String& sdPath) {
             (void)s.save();
           } else {
             sdManager.ensureSpiBusIdle();
-            const bool bwDecodeOk = ImageDecoder::decodeToDisplayFitWidth(coverPath.c_str(), display.getFrameBuffer(), 480, 800);
+            const bool bwDecodeOk = ImageDecoder::decodeToDisplayFitWidth(coverPath.c_str(), display.getFrameBuffer(), EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT);
             sdManager.ensureSpiBusIdle();
             const bool bwOk = bwDecodeOk &&
                               writeRawBufferToFile_tv(bwPath.c_str(), display.getFrameBuffer(), EInkDisplay::BUFFER_SIZE);
@@ -908,13 +939,13 @@ void TextViewerScreen::openFile(const String& sdPath) {
             if (bwOk && mask) {
               memset(mask, 0x00, EInkDisplay::BUFFER_SIZE);
               const bool lsbDecodeOk = ImageDecoder::decodeToDisplayFitWidth(
-                  coverPath.c_str(), display.getFrameBuffer(), 480, 800, mask, nullptr);
+                  coverPath.c_str(), display.getFrameBuffer(), EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT, mask, nullptr);
               sdManager.ensureSpiBusIdle();
               const bool lsbOk = lsbDecodeOk && writeRawBufferToFile_tv(lsbPath.c_str(), mask, EInkDisplay::BUFFER_SIZE);
 
               memset(mask, 0x00, EInkDisplay::BUFFER_SIZE);
               const bool msbDecodeOk = ImageDecoder::decodeToDisplayFitWidth(
-                  coverPath.c_str(), display.getFrameBuffer(), 480, 800, nullptr, mask);
+                  coverPath.c_str(), display.getFrameBuffer(), EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT, nullptr, mask);
               sdManager.ensureSpiBusIdle();
               const bool msbOk = msbDecodeOk && writeRawBufferToFile_tv(msbPath.c_str(), mask, EInkDisplay::BUFFER_SIZE);
 

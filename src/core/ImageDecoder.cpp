@@ -76,6 +76,30 @@ static inline void writePackedBit(uint8_t* buf, int byteIdx, int bitIdx, bool on
     }
 }
 
+// Convert portrait logical coordinates (px, py) to physical framebuffer coordinates.
+// Returns false if the pixel is out of bounds.
+// ESP32-C3: 800x480 landscape physical buffer, portrait logical requires rotation
+// Paper S3: 540x960 portrait physical buffer, no rotation needed
+static inline bool portraitToFramebuffer(int px, int py, int targetWidth, int targetHeight,
+                                         int& outByteIdx, int& outBitIdx) {
+#ifdef USE_M5UNIFIED
+    // Paper S3: portrait framebuffer, no rotation
+    if (px < 0 || px >= targetWidth || py < 0 || py >= targetHeight) return false;
+    const int widthBytes = (targetWidth + 7) / 8;
+    outByteIdx = py * widthBytes + (px / 8);
+    outBitIdx = 7 - (px % 8);
+    return true;
+#else
+    // ESP32-C3: landscape 800x480 physical, rotate portrait logical
+    const int fx = py;
+    const int fy = 479 - px;
+    if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) return false;
+    outByteIdx = (fy * 100) + (fx / 8);
+    outBitIdx = 7 - (fx % 8);
+    return true;
+#endif
+}
+
 bool ImageDecoder::decodeBmpPlaneFitWidth(const char* path, uint8_t* planeBuffer, uint16_t targetWidth, uint16_t targetHeight,
                                          uint8_t planeMask) {
     return decodeBMPToPlaneFitWidth(path, planeBuffer, targetWidth, targetHeight, planeMask);
@@ -401,12 +425,9 @@ bool ImageDecoder::decodeBMPToPlaneFitWidth(const char* path, uint8_t* planeBuff
             if (px < 0 || px >= (int)targetWidth) continue;
 
             // portrait logical -> physical framebuffer mapping
-            const int fx = py;
-            const int fy = 479 - px;
-            if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) continue;
+            int byteIdx, bitIdx;
+            if (!portraitToFramebuffer(px, py, targetWidth, targetHeight, byteIdx, bitIdx)) continue;
 
-            const int byteIdx = (fy * 100) + (fx / 8);
-            const int bitIdx = 7 - (fx % 8);
             bool active = false;
             // planeMask selects which pixels participate in the grayscale overlay.
             // LSB pass: only dark gray (value 1)
@@ -555,12 +576,9 @@ bool ImageDecoder::decodeBMPToDisplay(const char* path, DecodeContext* ctx) {
                 const uint8_t color = (lum < 128U) ? 0 : 1;
 
                 // portrait logical -> physical framebuffer mapping
-                const int fx = py;
-                const int fy = 479 - px;
-                if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) continue;
+                int byteIdx, bitIdx;
+                if (!portraitToFramebuffer(px, py, ctx->targetWidth, ctx->targetHeight, byteIdx, bitIdx)) continue;
 
-                const int byteIdx = (fy * 100) + (fx / 8);
-                const int bitIdx = 7 - (fx % 8);
                 writePackedBit(ctx->frameBuffer, byteIdx, bitIdx, color != 0);
                 // Crosspoint grayscale mask semantics:
                 // - LSB mask: mark dark gray only
@@ -611,12 +629,9 @@ bool ImageDecoder::decodeBMPToDisplay(const char* path, DecodeContext* ctx) {
                 const uint8_t q = quantize4(lum);
                 const uint8_t color = (lum < 128U) ? 0 : 1;
 
-                const int fx = py;
-                const int fy = 479 - px;
-                if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) continue;
+                int byteIdx, bitIdx;
+                if (!portraitToFramebuffer(px, py, ctx->targetWidth, ctx->targetHeight, byteIdx, bitIdx)) continue;
 
-                const int byteIdx = (fy * 100) + (fx / 8);
-                const int bitIdx = 7 - (fx % 8);
                 writePackedBit(ctx->frameBuffer, byteIdx, bitIdx, color != 0);
                 writePackedBit(ctx->grayscaleLsbBuffer, byteIdx, bitIdx, q == 1);
                 writePackedBit(ctx->grayscaleMsbBuffer, byteIdx, bitIdx, (q == 1) || (q == 2));
@@ -919,9 +934,8 @@ bool ImageDecoder::decodeToDisplay(const char* path, uint8_t* frameBuffer, uint1
                 const int py = ctx->offsetY + sy;
                 if (px < 0 || px >= (int)ctx->targetWidth || py < 0 || py >= (int)ctx->targetHeight) continue;
 
-                const int fx = py;
-                const int fy = 479 - px;
-                if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) continue;
+                int byteIdx, bitIdx;
+                if (!portraitToFramebuffer(px, py, ctx->targetWidth, ctx->targetHeight, byteIdx, bitIdx)) continue;
 
                 uint16_t pixel = usPixels[x];
                 uint8_t r = (pixel >> 11) & 0x1F; 
@@ -939,9 +953,6 @@ bool ImageDecoder::decodeToDisplay(const char* path, uint8_t* frameBuffer, uint1
 
                 const uint8_t q = quantize4((uint8_t)gray);
                 uint8_t color = (q < 3) ? 0 : 1;
-                
-                int byteIdx = (fy * 100) + (fx / 8);
-                int bitIdx = 7 - (fx % 8);
                 writePackedBit(ctx->frameBuffer, byteIdx, bitIdx, color != 0);
                 writePackedBit(ctx->grayscaleLsbBuffer, byteIdx, bitIdx, (q & 0x01) != 0);
                 writePackedBit(ctx->grayscaleMsbBuffer, byteIdx, bitIdx, (q & 0x02) != 0);
@@ -1230,9 +1241,8 @@ bool ImageDecoder::decodeToDisplayFitWidth(const char* path, uint8_t* frameBuffe
                     }
 
                     const int px = dx;
-                    const int fx = py;
-                    const int fy = 479 - px;
-                    if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) continue;
+                    int byteIdx, bitIdx;
+                    if (!portraitToFramebuffer(px, py, ctx->targetWidth, ctx->targetHeight, byteIdx, bitIdx)) continue;
 
                     uint16_t pixel = usPixels[sx];
                     uint8_t r = (pixel >> 11) & 0x1F;
@@ -1249,9 +1259,6 @@ bool ImageDecoder::decodeToDisplayFitWidth(const char* path, uint8_t* frameBuffe
                     else if (gray > 255) gray = 255;
 
                     uint8_t color = (gray < 128) ? 0 : 1;
-
-                    int byteIdx = (fy * 100) + (fx / 8);
-                    int bitIdx = 7 - (fx % 8);
                     if (color == 0) {
                         ctx->frameBuffer[byteIdx] &= ~(1 << bitIdx);
                     } else {
@@ -1383,12 +1390,9 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
                     const int px = ctx->offsetX + dx;
                     if (px < 0 || px >= (int)ctx->targetWidth) continue;
 
-                    const int fx = py;
-                    const int fy = 479 - px;
-                    if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) continue;
+                    int byteIdx, bitIdx;
+                    if (!portraitToFramebuffer(px, py, ctx->targetWidth, ctx->targetHeight, byteIdx, bitIdx)) continue;
 
-                    const int byteIdx = (fy * 100) + (fx / 8);
-                    const int bitIdx = 7 - (fx % 8);
                     if (ctx->planeMaskMode) {
                         bool active = false;
                         if (ctx->planeMask == 0x01) active = (q == 1);
@@ -1455,9 +1459,8 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw)
         }
         if (px < 0 || px >= (int)ctx->targetWidth || py < 0 || py >= (int)ctx->targetHeight) continue;
 
-        const int fx = py;
-        const int fy = 479 - px;
-        if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) continue;
+        int byteIdx, bitIdx;
+        if (!portraitToFramebuffer(px, py, ctx->targetWidth, ctx->targetHeight, byteIdx, bitIdx)) continue;
 
         uint16_t pixel = usPixels[x];
         uint8_t r = (pixel >> 11) & 0x1F; 
@@ -1478,9 +1481,6 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw)
 
         const uint8_t q = quantize4((uint8_t)gray);
         uint8_t color = (q < 3) ? 0 : 1;
-        
-        int byteIdx = (fy * 100) + (fx / 8);
-        int bitIdx = 7 - (fx % 8);
         if (ctx->planeMaskMode) {
             bool active = false;
             if (ctx->planeMask == 0x01) active = (q == 1);

@@ -79,9 +79,15 @@ class EInkDisplay {
   // Pin configuration
   int8_t _sclk, _mosi, _cs, _dc, _rst, _busy;
 
-  // Frame buffer (statically allocated)
+#ifdef USE_M5UNIFIED
+  // Frame buffers allocated in PSRAM at runtime (Paper S3 has 8MB PSRAM)
+  uint8_t* frameBuffer0;
+  uint8_t* frameBuffer1;
+#else
+  // Frame buffer (statically allocated for ESP32-C3 without PSRAM)
   uint8_t frameBuffer0[BUFFER_SIZE];
   uint8_t frameBuffer1[BUFFER_SIZE];
+#endif
 
   uint8_t* frameBuffer;
   uint8_t* frameBufferActive;

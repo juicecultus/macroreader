@@ -3,6 +3,7 @@
 #ifdef USE_M5UNIFIED
 #include <algorithm>
 #include <FastEPD.h>
+#include <esp_heap_caps.h>
 
 static FASTEPD g_epd;
 static bool g_epdInited = false;
@@ -128,6 +129,10 @@ EInkDisplay::EInkDisplay(int8_t sclk, int8_t mosi, int8_t cs, int8_t dc, int8_t 
       _dc(dc),
       _rst(rst),
       _busy(busy),
+#ifdef USE_M5UNIFIED
+      frameBuffer0(nullptr),
+      frameBuffer1(nullptr),
+#endif
       frameBuffer(nullptr),
       frameBufferActive(nullptr),
       customLutActive(false),
@@ -150,14 +155,31 @@ EInkDisplay::~EInkDisplay() {
 void EInkDisplay::begin() {
   Serial.printf("[%lu] EInkDisplay: begin() called\n", millis());
 
+#ifdef USE_M5UNIFIED
+  // Paper S3: allocate framebuffers from PSRAM to free internal RAM for stack
+  if (!frameBuffer0) {
+    frameBuffer0 = (uint8_t*)heap_caps_malloc(BUFFER_SIZE, MALLOC_CAP_SPIRAM);
+    if (!frameBuffer0) {
+      Serial.println("ERROR: Failed to allocate frameBuffer0 from PSRAM!");
+    }
+  }
+  if (!frameBuffer1) {
+    frameBuffer1 = (uint8_t*)heap_caps_malloc(BUFFER_SIZE, MALLOC_CAP_SPIRAM);
+    if (!frameBuffer1) {
+      Serial.println("ERROR: Failed to allocate frameBuffer1 from PSRAM!");
+    }
+  }
+  Serial.printf("[%lu]   PSRAM frame buffers (2 x %lu bytes = %luKB)\n", millis(), BUFFER_SIZE, (BUFFER_SIZE * 2) / 1024);
+#else
+  Serial.printf("[%lu]   Static frame buffers (2 x %lu bytes)\n", millis(), BUFFER_SIZE);
+#endif
+
   frameBuffer = frameBuffer0;
   frameBufferActive = frameBuffer1;
 
   // Initialize to white
   memset(frameBuffer0, 0xFF, BUFFER_SIZE);
   memset(frameBuffer1, 0xFF, BUFFER_SIZE);
-
-  Serial.printf("[%lu]   Static frame buffers (2 x %lu bytes = 96KB)\n", millis(), BUFFER_SIZE);
   Serial.printf("[%lu]   Initializing e-ink display driver...\n", millis());
 
 #ifdef USE_M5UNIFIED
@@ -184,7 +206,7 @@ void EInkDisplay::begin() {
   }
   isScreenOn = true;
 
-#elif defined(ARDUINO)
+#elif defined(ARDUINO) && !defined(USE_M5UNIFIED)
   // Initialize SPI with custom pins
   SPI.begin(_sclk, -1, _mosi, _cs);
   spiSettings = SPISettings(40000000, MSBFIRST, SPI_MODE0);  // MODE0 is standard for SSD1677
@@ -222,7 +244,12 @@ void EInkDisplay::begin() {
 }
 
 bool EInkDisplay::supportsGrayscale() const {
+#ifdef USE_M5UNIFIED
+  // Paper S3: FastEPD handles display differently; skip legacy grayscale path
+  return false;
+#else
   return true;
+#endif
 }
 
 // ============================================================================
@@ -329,6 +356,7 @@ void EInkDisplay::initDisplayController() {
 }
 
 void EInkDisplay::setRamArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+#if defined(ARDUINO) && !defined(USE_M5UNIFIED)
   const uint16_t WIDTH = 800;
   const uint16_t HEIGHT = 480;
   const uint8_t DATA_ENTRY_X_INC_Y_DEC = 0x01;
@@ -363,6 +391,12 @@ void EInkDisplay::setRamArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
   sendCommand(CMD_SET_RAM_Y_COUNTER);
   sendData((y + h - 1) % 256);  // low byte
   sendData((y + h - 1) / 256);  // high byte
+#else
+  (void)x;
+  (void)y;
+  (void)w;
+  (void)h;
+#endif
 }
 
 void EInkDisplay::clearScreen(uint8_t color) {
@@ -404,6 +438,7 @@ void EInkDisplay::drawImage(const uint8_t* imageData, uint16_t x, uint16_t y, ui
 }
 
 void EInkDisplay::writeRamBuffer(uint8_t ramBuffer, const uint8_t* data, uint32_t size) {
+#if defined(ARDUINO) && !defined(USE_M5UNIFIED)
   const char* bufferName = (ramBuffer == CMD_WRITE_RAM_BW) ? "BW" : "RED";
   unsigned long startTime = millis();
   Serial.printf("[%lu]   Writing frame buffer to %s RAM (%lu bytes)...\n", startTime, bufferName, size);
@@ -413,6 +448,11 @@ void EInkDisplay::writeRamBuffer(uint8_t ramBuffer, const uint8_t* data, uint32_
 
   unsigned long duration = millis() - startTime;
   Serial.printf("[%lu]   %s RAM write complete (%lu ms)\n", millis(), bufferName, duration);
+#else
+  (void)ramBuffer;
+  (void)data;
+  (void)size;
+#endif
 }
 
 void EInkDisplay::setFramebuffer(const uint8_t* bwBuffer) {
@@ -426,6 +466,7 @@ void EInkDisplay::swapBuffers() {
 }
 
 void EInkDisplay::grayscaleRevert() {
+#if defined(ARDUINO) && !defined(USE_M5UNIFIED)
   if (!inGrayscaleMode) {
     return;
   }
@@ -436,22 +477,38 @@ void EInkDisplay::grayscaleRevert() {
   setCustomLUT(true, lut_grayscale_revert);
   refreshDisplay(FAST_REFRESH);
   setCustomLUT(false);
+#else
+  inGrayscaleMode = false;
+#endif
 }
 
 void EInkDisplay::copyGrayscaleLsbBuffers(const uint8_t* lsbBuffer) {
+#if defined(ARDUINO) && !defined(USE_M5UNIFIED)
   setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
   writeRamBuffer(CMD_WRITE_RAM_BW, lsbBuffer, BUFFER_SIZE);
+#else
+  (void)lsbBuffer;
+#endif
 }
 
 void EInkDisplay::copyGrayscaleMsbBuffers(const uint8_t* msbBuffer) {
+#if defined(ARDUINO) && !defined(USE_M5UNIFIED)
   setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
   writeRamBuffer(CMD_WRITE_RAM_RED, msbBuffer, BUFFER_SIZE);
+#else
+  (void)msbBuffer;
+#endif
 }
 
 void EInkDisplay::copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer) {
+#if defined(ARDUINO) && !defined(USE_M5UNIFIED)
   setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
   writeRamBuffer(CMD_WRITE_RAM_BW, lsbBuffer, BUFFER_SIZE);
   writeRamBuffer(CMD_WRITE_RAM_RED, msbBuffer, BUFFER_SIZE);
+#else
+  (void)lsbBuffer;
+  (void)msbBuffer;
+#endif
 }
 
 void EInkDisplay::displayBuffer(RefreshMode mode) {
@@ -537,7 +594,7 @@ void EInkDisplay::displayBuffer(RefreshMode mode) {
 
   swapBuffers();
 
-#elif defined(ARDUINO)
+#elif defined(ARDUINO) && !defined(USE_M5UNIFIED)
   if (!isScreenOn) {
     // Force half refresh if screen is off
     mode = HALF_REFRESH;
@@ -573,7 +630,12 @@ void EInkDisplay::displayBuffer(RefreshMode mode) {
 }
 
 void EInkDisplay::displayGrayBuffer(bool turnOffScreen) {
-#ifdef ARDUINO
+#ifdef USE_M5UNIFIED
+  // Paper S3: FastEPD handles grayscale internally; no custom LUT needed.
+  drawGrayscale = false;
+  inGrayscaleMode = true;
+  (void)turnOffScreen;
+#elif defined(ARDUINO) && !defined(USE_M5UNIFIED)
   drawGrayscale = false;
   inGrayscaleMode = true;
 
@@ -593,7 +655,7 @@ void EInkDisplay::refreshDisplay(RefreshMode mode, bool turnOffScreen) {
   (void)mode;
   (void)turnOffScreen;
 
-#elif defined(ARDUINO)
+#elif defined(ARDUINO) && !defined(USE_M5UNIFIED)
   // Configure Display Update Control 1
   sendCommand(CMD_DISPLAY_UPDATE_CTRL1);
   sendData((mode == FAST_REFRESH) ? CTRL1_NORMAL : CTRL1_BYPASS_RED);  // Configure buffer comparison mode
@@ -643,7 +705,7 @@ void EInkDisplay::refreshDisplay(RefreshMode mode, bool turnOffScreen) {
 }
 
 void EInkDisplay::setCustomLUT(bool enabled, const unsigned char* lutData) {
-#ifdef ARDUINO
+#if defined(ARDUINO) && !defined(USE_M5UNIFIED)
   if (enabled) {
     Serial.printf("[%lu]   Loading custom LUT...\n", millis());
 
@@ -683,7 +745,7 @@ void EInkDisplay::deepSleep() {
   // M5Unified owns display power management. No-op for now.
   isScreenOn = false;
 
-#elif defined(ARDUINO)
+#elif defined(ARDUINO) && !defined(USE_M5UNIFIED)
   Serial.printf("[%lu]   Preparing display for deep sleep...\n", millis());
 
   // First, power down the display properly

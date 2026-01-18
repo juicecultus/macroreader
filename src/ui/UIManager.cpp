@@ -362,8 +362,8 @@ void UIManager::showSleepScreen() {
     int16_t x1, y1;
     uint16_t w, h;
     textRenderer.getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
-    int16_t cx = (480 - (int)w) / 2;
-    int16_t cy = (800 - (int)h) / 2;
+    int16_t cx = ((int16_t)EInkDisplay::DISPLAY_WIDTH - (int)w) / 2;
+    int16_t cy = ((int16_t)EInkDisplay::DISPLAY_HEIGHT - (int)h) / 2;
     textRenderer.setCursor(cx, cy);
     textRenderer.print(msg);
   }
@@ -409,8 +409,9 @@ void UIManager::showSleepScreen() {
         if (epubPath.length() > 0 && SD.exists(epubPath.c_str())) {
           Serial.printf("[%lu]   Sleep cover missing on disk; extracting on-demand...\n", millis());
           // Keep this conservative: extraction allocates; skip if heap is extremely low.
+          // Use MALLOC_CAP_INTERNAL to avoid walking 8MB PSRAM which triggers WDT on ESP32-S3
           const uint32_t freeHeap = ESP.getFreeHeap();
-          const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+          const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
           if (freeHeap > 90000 && largest > 60000) {
             sdManager.ensureSpiBusIdle();
             EpubReader er(epubPath.c_str());
@@ -466,8 +467,9 @@ void UIManager::showSleepScreen() {
         coverIsBmp = lf.endsWith(".bmp");
 
         // JPEG/PNG decode can allocate internally; if heap is extremely low, skip decode.
+        // Use MALLOC_CAP_INTERNAL to avoid walking 8MB PSRAM which triggers WDT on ESP32-S3
         const uint32_t freeHeap = ESP.getFreeHeap();
-        const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+        const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         Serial.printf("[%lu]   Sleep cover heap before decode: Free=%u\n", millis(), (unsigned)freeHeap);
         Serial.printf("[%lu]   Sleep cover heap largest free block: %u\n", millis(), (unsigned)largest);
         if (freeHeap < 60000) {
@@ -480,7 +482,7 @@ void UIManager::showSleepScreen() {
                           (unsigned)largest);
           } else {
           // Decode BW only here. Grayscale overlay is applied later.
-          if (ImageDecoder::decodeToDisplayFitWidth(coverPath.c_str(), display.getFrameBuffer(), 480, 800)) {
+          if (ImageDecoder::decodeToDisplayFitWidth(coverPath.c_str(), display.getFrameBuffer(), EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT)) {
             usedRandomCover = true;
 
             // If this is a JPG/PNG cover, prepare a fast raw bundle cache during sleep.
@@ -591,7 +593,7 @@ void UIManager::showSleepScreen() {
           }
         }
 
-        if (ImageDecoder::decodeToDisplay(selected.c_str(), display.getFrameBuffer(), 480, 800, grayLsb, grayMsb)) {
+        if (ImageDecoder::decodeToDisplay(selected.c_str(), display.getFrameBuffer(), EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT, grayLsb, grayMsb)) {
           usedRandomCover = true;
           g_lastSleepCoverIndex = idx;
 
@@ -631,9 +633,9 @@ void UIManager::showSleepScreen() {
     int16_t x1, y1;
     uint16_t w, h;
     textRenderer.getTextBounds(sleepText, 0, 0, &x1, &y1, &w, &h);
-    int16_t centerX = (480 - w) / 2;
+    int16_t centerX = ((int16_t)EInkDisplay::DISPLAY_WIDTH - w) / 2;
 
-    textRenderer.setCursor(centerX, 780);
+    textRenderer.setCursor(centerX, EInkDisplay::DISPLAY_HEIGHT - 20);
     textRenderer.print(sleepText);
   }
 
@@ -698,11 +700,11 @@ void UIManager::showSleepScreen() {
       // Crosspoint-style grayscale pipeline for BMP covers without extra 48KB allocations:
       // decode plane into framebuffer, copy to display RAM, repeat for MSB.
       display.clearScreen(0x00);
-      if (ImageDecoder::decodeBmpPlaneFitWidth(coverBmpPath.c_str(), display.getFrameBuffer(), 480, 800, 0x01)) {
+      if (ImageDecoder::decodeBmpPlaneFitWidth(coverBmpPath.c_str(), display.getFrameBuffer(), EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT, 0x01)) {
         display.copyGrayscaleLsbBuffers(display.getFrameBuffer());
       }
       display.clearScreen(0x00);
-      if (ImageDecoder::decodeBmpPlaneFitWidth(coverBmpPath.c_str(), display.getFrameBuffer(), 480, 800, 0x02)) {
+      if (ImageDecoder::decodeBmpPlaneFitWidth(coverBmpPath.c_str(), display.getFrameBuffer(), EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT, 0x02)) {
         display.copyGrayscaleMsbBuffers(display.getFrameBuffer());
       }
       display.displayGrayBuffer(true);
@@ -716,7 +718,7 @@ void UIManager::showSleepScreen() {
       if (mask) {
         memset(mask, 0x00, EInkDisplay::BUFFER_SIZE);
         // Decode fills mask semantics (LSB=dark only) when only grayscaleLsbBuffer is provided.
-        (void)ImageDecoder::decodeToDisplayFitWidth(coverBmpPath.c_str(), display.getFrameBuffer(), 480, 800, mask, nullptr);
+        (void)ImageDecoder::decodeToDisplayFitWidth(coverBmpPath.c_str(), display.getFrameBuffer(), EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT, mask, nullptr);
         display.copyGrayscaleLsbBuffers(mask);
 
         if (wantCacheBundle) {
@@ -740,7 +742,7 @@ void UIManager::showSleepScreen() {
       if (mask) {
         memset(mask, 0x00, EInkDisplay::BUFFER_SIZE);
         // Decode fills mask semantics (MSB=dark+light) when only grayscaleMsbBuffer is provided.
-        (void)ImageDecoder::decodeToDisplayFitWidth(coverBmpPath.c_str(), display.getFrameBuffer(), 480, 800, nullptr, mask);
+        (void)ImageDecoder::decodeToDisplayFitWidth(coverBmpPath.c_str(), display.getFrameBuffer(), EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT, nullptr, mask);
         display.copyGrayscaleMsbBuffers(mask);
 
         if (wantCacheBundle) {
@@ -1116,9 +1118,9 @@ void UIManager::openTextFile(const String& sdPath) {
     textRenderer.getTextBounds(l2, 0, 0, &x1, &y1, &w2, &h2);
     const int16_t lineGap = 8;
     int16_t totalH = (int16_t)h1 + lineGap + (int16_t)h2;
-    int16_t startY = (800 - totalH) / 2;
-    int16_t cx1 = (480 - (int)w1) / 2;
-    int16_t cx2 = (480 - (int)w2) / 2;
+    int16_t startY = ((int16_t)EInkDisplay::DISPLAY_HEIGHT - totalH) / 2;
+    int16_t cx1 = ((int16_t)EInkDisplay::DISPLAY_WIDTH - (int)w1) / 2;
+    int16_t cx2 = ((int16_t)EInkDisplay::DISPLAY_WIDTH - (int)w2) / 2;
     textRenderer.setCursor(cx1, startY);
     textRenderer.print(l1);
     textRenderer.setCursor(cx2, startY + (int16_t)h1 + lineGap);
@@ -1151,9 +1153,9 @@ void UIManager::openXtcFile(const String& sdPath) {
     textRenderer.getTextBounds(l2, 0, 0, &x1, &y1, &w2, &h2);
     const int16_t lineGap = 8;
     int16_t totalH = (int16_t)h1 + lineGap + (int16_t)h2;
-    int16_t startY = (800 - totalH) / 2;
-    int16_t cx1 = (480 - (int)w1) / 2;
-    int16_t cx2 = (480 - (int)w2) / 2;
+    int16_t startY = ((int16_t)EInkDisplay::DISPLAY_HEIGHT - totalH) / 2;
+    int16_t cx1 = ((int16_t)EInkDisplay::DISPLAY_WIDTH - (int)w1) / 2;
+    int16_t cx2 = ((int16_t)EInkDisplay::DISPLAY_WIDTH - (int)w2) / 2;
     textRenderer.setCursor(cx1, startY);
     textRenderer.print(l1);
     textRenderer.setCursor(cx2, startY + (int16_t)h1 + lineGap);

@@ -1,5 +1,19 @@
 #include "Buttons.h"
 
+#ifdef USE_M5UNIFIED
+#include <bb_captouch.h>
+
+#include "EInkDisplay.h"
+
+static BBCapTouch g_bbct;
+static bool g_bbctInited = false;
+
+static constexpr int TOUCH_SDA = 41;
+static constexpr int TOUCH_SCL = 42;
+static constexpr int TOUCH_INT = 48;
+static constexpr int TOUCH_RST = -1;
+#endif
+
 const int Buttons::ADC_THRESHOLDS_1[] = {3470, 2655, 1470, 3};
 const int Buttons::ADC_THRESHOLDS_2[] = {2205, 3};
 const char* Buttons::BUTTON_NAMES[] = {"Back", "Confirm", "Left", "Right", "Volume Up", "Volume Down", "Power"};
@@ -14,9 +28,14 @@ Buttons::Buttons() : currentState(0), previousState(0) {
 
 void Buttons::begin() {
 #ifdef USE_M5UNIFIED
-  // Paper S3: do not configure GPIO38/39 here.
-  // On Paper S3 these are used by the SD card SPI bus (MOSI=38, SCK=39).
-  // Navigation will be via touch; keep this as a no-op for now.
+  if (!g_bbctInited) {
+    const int rc = g_bbct.init(TOUCH_SDA, TOUCH_SCL, TOUCH_RST, TOUCH_INT);
+    Serial.printf("Buttons: BBCapTouch init rc=%d\n", rc);
+    if (rc == CT_SUCCESS) {
+      Serial.printf("Buttons: Touch sensor type=%d\n", g_bbct.sensorType());
+      g_bbctInited = true;
+    }
+  }
   return;
 #else
   pinMode(BUTTON_ADC_PIN_1, INPUT);
@@ -44,7 +63,52 @@ uint8_t Buttons::getState() {
   uint8_t state = 0;
 
 #ifdef USE_M5UNIFIED
-  // Paper S3: touch-driven navigation (no GPIO buttons).
+  if (!g_bbctInited) {
+    return state;
+  }
+
+  TOUCHINFO ti;
+  g_bbct.getSamples(&ti);
+  if (ti.count <= 0) {
+    return state;
+  }
+
+  // Two-finger touch as a global BACK.
+  if (ti.count >= 2) {
+    state |= (1 << BACK);
+    return state;
+  }
+
+  // FastEPD's Paper S3 example notes X/Y are reversed relative to the display.
+  // Convert into our portrait coordinate system (0..DISPLAY_WIDTH-1, 0..DISPLAY_HEIGHT-1).
+  const int16_t x = (int16_t)EInkDisplay::DISPLAY_WIDTH - 1 - (int16_t)ti.x[0];
+  const int16_t y = (int16_t)EInkDisplay::DISPLAY_HEIGHT - 1 - (int16_t)ti.y[0];
+
+  if (x < 0 || x >= (int16_t)EInkDisplay::DISPLAY_WIDTH || y < 0 || y >= (int16_t)EInkDisplay::DISPLAY_HEIGHT) {
+    return state;
+  }
+
+  // Simple screen-zone mapping:
+  // - Top-left corner: BACK
+  // - Left third: LEFT
+  // - Right third: RIGHT
+  // - Middle: CONFIRM
+  const int16_t backZoneW = 90;
+  const int16_t backZoneH = 90;
+  if (x < backZoneW && y < backZoneH) {
+    state |= (1 << BACK);
+    return state;
+  }
+
+  const int16_t w = (int16_t)EInkDisplay::DISPLAY_WIDTH;
+  if (x < (w / 3)) {
+    state |= (1 << LEFT);
+  } else if (x >= (w - (w / 3))) {
+    state |= (1 << RIGHT);
+  } else {
+    state |= (1 << CONFIRM);
+  }
+
   return state;
 #else
 

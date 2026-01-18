@@ -220,7 +220,14 @@ void setup() {
 
   // Start button update task
   Serial.println("Init: Button task...");
+#ifdef USE_M5UNIFIED
+  // Paper S3 touch uses I2C (Wire) under the hood. Polling touch from a background task
+  // can lead to I2C driver invalid state / watchdog issues while the main thread is doing
+  // heavy work (e.g. EPUB extraction/parsing). Keep input polling single-threaded by
+  // updating buttons from loop() only.
+#else
   xTaskCreate(buttonUpdateTask, "btnUpdate", 2048, &buttons, 1, nullptr);
+#endif
   Serial.println("Button update task started");
 
   // Initialize SD card manager
@@ -251,6 +258,15 @@ void setup() {
 }
 
 void loop() {
+  // Paper S3: update touch/buttons from the main loop to keep I2C access single-threaded.
+#ifdef USE_M5UNIFIED
+  static unsigned long lastBtnPollMs = 0;
+  const unsigned long nowMs = millis();
+  if (nowMs - lastBtnPollMs >= 20) {
+    buttons.update();
+    lastBtnPollMs = nowMs;
+  }
+#endif
   // Print memory stats every second
   static unsigned long lastMemPrint = 0;
   if (Serial && millis() - lastMemPrint >= 4000) {
