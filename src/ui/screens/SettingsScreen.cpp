@@ -15,6 +15,7 @@ constexpr int SettingsScreen::marginValues[];
 constexpr int SettingsScreen::lineHeightValues[];
 constexpr int SettingsScreen::paragraphSpacingValues[];
 constexpr int SettingsScreen::refreshPassesValues[];
+constexpr int SettingsScreen::refreshFrequencyValues[];
 
 SettingsScreen::SettingsScreen(EInkDisplay& display, TextRenderer& renderer, UIManager& uiManager)
     : display(display), textRenderer(renderer), uiManager(uiManager) {}
@@ -195,6 +196,11 @@ void SettingsScreen::toggleCurrentSetting() {
         refreshPassesIndex = 0;
       applyRefreshPasses();
       break;
+    case 17:  // Refresh Frequency
+      refreshFrequencyIndex++;
+      if (refreshFrequencyIndex >= refreshFrequencyValuesCount)
+        refreshFrequencyIndex = 0;
+      break;
   }
   saveSettings();
   show();
@@ -297,11 +303,22 @@ void SettingsScreen::loadSettings() {
   }
 
   // Refresh passes: load and find index
-  int refreshPasses = 12;  // Default
+  int refreshPasses = 8;  // Default
   if (s.getInt(String("settings.refreshPasses"), refreshPasses)) {
     for (int i = 0; i < refreshPassesValuesCount; i++) {
       if (refreshPassesValues[i] == refreshPasses) {
         refreshPassesIndex = i;
+        break;
+      }
+    }
+  }
+
+  // Refresh frequency: load and find index
+  int refreshFrequency = 8;  // Default
+  if (s.getInt(String("settings.refreshFrequency"), refreshFrequency)) {
+    for (int i = 0; i < refreshFrequencyValuesCount; i++) {
+      if (refreshFrequencyValues[i] == refreshFrequency) {
+        refreshFrequencyIndex = i;
         break;
       }
     }
@@ -328,6 +345,7 @@ void SettingsScreen::saveSettings() {
   s.setInt(String("settings.sleepTimeout"), sleepTimeoutIndex);
   s.setInt(String("settings.startupBehavior"), startupBehaviorIndex);
   s.setInt(String("settings.refreshPasses"), refreshPassesValues[refreshPassesIndex]);
+  s.setInt(String("settings.refreshFrequency"), refreshFrequencyValues[refreshFrequencyIndex]);
 
   if (!s.save()) {
     Serial.println("SettingsScreen: Failed to write settings.cfg");
@@ -370,6 +388,8 @@ String SettingsScreen::getSettingName(int index) {
       return "Startup";
     case 16:
       return "Refresh Passes";
+    case 17:
+      return "Refresh Frequency";
     default:
       return "";
   }
@@ -462,6 +482,8 @@ String SettingsScreen::getSettingValue(int index) {
       return startupBehaviorIndex ? "Resume" : "Home";
     case 16:
       return String(refreshPassesValues[refreshPassesIndex]);
+    case 17:
+      return String(refreshFrequencyValues[refreshFrequencyIndex]);
     default:
       return "";
   }

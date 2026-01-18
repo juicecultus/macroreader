@@ -54,7 +54,7 @@ class TextViewerScreen : public Screen {
   UIManager& uiManager;
 
   uint32_t pageRenderCounter = 0;
-  static constexpr uint32_t kConditionEvery = 8;
+  uint32_t refreshFrequency = 8;  // Pages between full refreshes (loaded from settings)
 
   WordProvider* provider = nullptr;
   // Keep the loaded text alive for the lifetime of the provider

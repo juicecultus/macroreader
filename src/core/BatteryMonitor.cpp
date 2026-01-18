@@ -18,10 +18,12 @@ uint16_t BatteryMonitor::readPercentage() const {
 
 uint16_t BatteryMonitor::readMillivolts() const {
 #ifdef USE_M5UNIFIED
-  // Paper S3: Battery voltage via ADC on GPIO 3 with voltage divider (2x)
+  // Paper S3: Battery voltage via ADC on GPIO 3 with voltage divider
   // Use analogReadMilliVolts() which handles calibration internally without legacy driver
+  // The voltage divider ratio appears to be ~2.04x based on calibration
+  // (fully charged battery reads ~2060mV at ADC, actual voltage ~4200mV)
   const uint32_t mv = analogReadMilliVolts(PAPER_S3_BAT_ADC_PIN);
-  return static_cast<uint16_t>(mv * 2);  // 2x voltage divider
+  return static_cast<uint16_t>((mv * 204) / 100);  // ~2.04x voltage divider
 #else
   const uint16_t raw = readRawMillivolts();
   const uint32_t mv = millivoltsFromRawAdc(raw);

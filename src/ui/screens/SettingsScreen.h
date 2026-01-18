@@ -25,7 +25,7 @@ class SettingsScreen : public Screen {
 
   // Menu navigation
   int selectedIndex = 0;
-  static constexpr int SETTINGS_COUNT = 17;
+  static constexpr int SETTINGS_COUNT = 18;
 
   // Setting values and their current indices
   int marginIndex = 1;
@@ -49,7 +49,10 @@ class SettingsScreen : public Screen {
   int startupBehaviorIndex = 1;
 
   // Display refresh passes: 0=4, 1=6, 2=8, 3=10, 4=12, 5=14, 6=16
-  int refreshPassesIndex = 4;  // Default to 12 passes
+  int refreshPassesIndex = 2;  // Default to 8 passes
+
+  // Refresh frequency: pages between full refreshes (0=1, 1=5, 2=8, 3=10, 4=15, 5=30)
+  int refreshFrequencyIndex = 2;  // Default to 8 pages
 
   int clearCacheStatus = -1; // -1=idle, 0=fail, 1=ok
 
@@ -62,6 +65,8 @@ class SettingsScreen : public Screen {
   static constexpr int paragraphSpacingValuesCount = 6;
   static constexpr int refreshPassesValues[] = {4, 6, 8, 10, 12, 14, 16};
   static constexpr int refreshPassesValuesCount = 7;
+  static constexpr int refreshFrequencyValues[] = {1, 5, 8, 10, 15, 30};
+  static constexpr int refreshFrequencyValuesCount = 6;
   // Alignment: 0=LEFT, 1=CENTER, 2=RIGHT
   // showChapterNumbers: 0=OFF, 1=ON
 

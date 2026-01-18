@@ -405,6 +405,13 @@ void TextViewerScreen::saveSettingsToFile() {
 
 void TextViewerScreen::activate() {
   pageStartIndex = 0;
+
+  // Load refresh frequency from settings
+  Settings& s = uiManager.getSettings();
+  int freq = 8;
+  s.getInt(String("settings.refreshFrequency"), freq);
+  refreshFrequency = (uint32_t)freq;
+
   // If a file was pending to open from settings, open it now (first time the
   // screen becomes active) so showing happens from an explicit show() path.
   if (pendingOpenPath.length() > 0 && currentFilePath.length() == 0) {
@@ -669,7 +676,7 @@ void TextViewerScreen::showPage() {
   }
 
   // display bw parts
-  const bool doCondition = (kConditionEvery > 0) && (pageRenderCounter > 0) && ((pageRenderCounter % kConditionEvery) == 0);
+  const bool doCondition = (refreshFrequency > 0) && (pageRenderCounter > 0) && ((pageRenderCounter % refreshFrequency) == 0);
   display.displayBuffer(doCondition ? EInkDisplay::FULL_REFRESH : EInkDisplay::FAST_REFRESH);
 
   if (!doCondition && display.supportsGrayscale()) {
