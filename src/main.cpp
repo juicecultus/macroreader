@@ -169,16 +169,23 @@ void enterDeepSleep() {
     uiManager->showSleepScreen();
 
 #ifdef USE_M5UNIFIED
-  // Paper S3: Use touch interrupt (GPIO 48) for wakeup
-  // The touch controller pulls INT low when touched
+  // Paper S3: Enter deep sleep
+  // The PWR button is a hardware power button that will power-cycle the device
+  // to wake it up. We also try ULP wakeup as a fallback.
   delay(100);  // Allow display to finish updating
-  Serial.println("Entering deep sleep with touch wakeup on GPIO 48...");
+  Serial.println("Entering deep sleep...");
   Serial.flush();
   
-  // Configure GPIO 48 (touch INT) as wakeup source
-  // Use gpio_wakeup which works with any GPIO on ESP32-S3
-  gpio_wakeup_enable((gpio_num_t)48, GPIO_INTR_LOW_LEVEL);
-  esp_sleep_enable_gpio_wakeup();
+  // Try to enable ULP wakeup (may fail if ULP not configured, that's OK)
+  esp_err_t err = esp_sleep_enable_ulp_wakeup();
+  if (err != ESP_OK) {
+    Serial.printf("ULP wakeup not available: %s\n", esp_err_to_name(err));
+  }
+  
+  // Also enable timer wakeup as fallback (wake after 24 hours if nothing else wakes it)
+  esp_sleep_enable_timer_wakeup(24ULL * 60 * 60 * 1000000ULL);
+  
+  delay(500);  // Give time for serial output
   esp_deep_sleep_start();
 #else
   // Enter deep sleep mode
