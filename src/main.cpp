@@ -169,15 +169,18 @@ void enterDeepSleep() {
     uiManager->showSleepScreen();
 
 #ifdef USE_M5UNIFIED
-  return;
+  // Paper S3: Use touch interrupt (GPIO 48) for wakeup
+  // The touch controller pulls INT low when touched
+  delay(100);  // Allow display to finish updating
+  Serial.println("Entering deep sleep with touch wakeup on GPIO 48...");
+  Serial.flush();
+  
+  // Configure GPIO 48 (touch INT) as wakeup source using EXT1
+  // EXT1 supports multiple GPIOs and works with ESP32-S3
+  esp_sleep_enable_ext1_wakeup(1ULL << 48, ESP_EXT1_WAKEUP_ANY_LOW);
+  esp_deep_sleep_start();
 #else
-
   // Enter deep sleep mode
-  // this seems to start the display and leads to grayish screen somehow???
-  // einkDisplay.deepSleep();
-  // Serial.println("Entering deep sleep mode...");
-  // delay(10);  // Allow serial buffer to empty
-
   // Enable wakeup on power button (active LOW)
   pinMode(POWER_BUTTON_PIN, INPUT_PULLUP);
   esp_deep_sleep_enable_gpio_wakeup(1ULL << POWER_BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
