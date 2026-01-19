@@ -25,7 +25,7 @@ class SettingsScreen : public Screen {
 
   // Menu navigation
   int selectedIndex = 0;
-  static constexpr int SETTINGS_COUNT = 18;
+  static constexpr int SETTINGS_COUNT = 19;
 
   // Setting values and their current indices
   int marginIndex = 1;
@@ -81,6 +81,7 @@ class SettingsScreen : public Screen {
   void applyRefreshPasses();
   String getSettingName(int index);
   String getSettingValue(int index);
+  String getCustomFontDisplayName();
 };
 
 #endif

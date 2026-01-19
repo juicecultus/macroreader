@@ -25,6 +25,7 @@ class WifiSsidSelectScreen;
 class WifiPasswordEntryScreen;
 class ClockSettingsScreen;
 class TimezoneSelectScreen;
+class FontSelectScreen;
 
 class Settings;
 
@@ -43,6 +44,7 @@ class UIManager {
     WifiSsidSelect,
     WifiPasswordEntry,
     TimezoneSelect,
+    FontSelect,
     Count
   };
 

@@ -27,6 +27,7 @@
 #include "ui/screens/XtcViewerScreen.h"
 #include "ui/screens/ClockSettingsScreen.h"
 #include "ui/screens/TimezoneSelectScreen.h"
+#include "ui/screens/FontSelectScreen.h"
 #include "ui/screens/WifiPasswordEntryScreen.h"
 #include "ui/screens/WifiSettingsScreen.h"
 #include "ui/screens/WifiSsidSelectScreen.h"
@@ -222,6 +223,8 @@ UIManager::UIManager(EInkDisplay& display, SDCardManager& sdManager, Buttons& bu
       std::unique_ptr<Screen>(new WifiPasswordEntryScreen(display, textRenderer, *this));
   screens[ScreenId::TimezoneSelect] =
       std::unique_ptr<Screen>(new TimezoneSelectScreen(display, textRenderer, *this));
+  screens[ScreenId::FontSelect] =
+      std::unique_ptr<Screen>(new FontSelectScreen(display, textRenderer, *this));
   Serial.printf("[%lu] UIManager: Constructor called\n", millis());
 }
 

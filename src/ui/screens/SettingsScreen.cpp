@@ -201,6 +201,10 @@ void SettingsScreen::toggleCurrentSetting() {
       if (refreshFrequencyIndex >= refreshFrequencyValuesCount)
         refreshFrequencyIndex = 0;
       break;
+    case 18:  // Custom Font
+      saveSettings();
+      uiManager.showScreen(UIManager::ScreenId::FontSelect);
+      return;
   }
   saveSettings();
   show();
@@ -390,6 +394,8 @@ String SettingsScreen::getSettingName(int index) {
       return "Refresh Passes";
     case 17:
       return "Refresh Frequency";
+    case 18:
+      return "Custom Font";
     default:
       return "";
   }
@@ -484,6 +490,8 @@ String SettingsScreen::getSettingValue(int index) {
       return String(refreshPassesValues[refreshPassesIndex]);
     case 17:
       return String(refreshFrequencyValues[refreshFrequencyIndex]);
+    case 18:
+      return getCustomFontDisplayName();
     default:
       return "";
   }
@@ -551,4 +559,18 @@ void SettingsScreen::applyUIFontSettings() {
 void SettingsScreen::applyRefreshPasses() {
   // Apply the refresh passes setting to the display
   display.setRefreshPasses(refreshPassesValues[refreshPassesIndex]);
+}
+
+String SettingsScreen::getCustomFontDisplayName() {
+  Settings& s = uiManager.getSettings();
+  String fontPath;
+  if (s.getString(String("settings.customFont"), fontPath) && fontPath.length() > 0) {
+    // Extract just the filename from the path
+    int lastSlash = fontPath.lastIndexOf('/');
+    if (lastSlash >= 0) {
+      return fontPath.substring(lastSlash + 1);
+    }
+    return fontPath;
+  }
+  return "Built-in";
 }
