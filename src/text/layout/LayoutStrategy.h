@@ -53,7 +53,8 @@ class LayoutStrategy {
     int16_t marginTop;
     int16_t marginBottom;
     int16_t lineHeight;
-    int16_t paragraphSpacing;
+    int16_t lineSpacing;       // Space between lines (for vertical centering calc)
+    int16_t paragraphSpacing;  // Extra space between paragraphs
     int16_t minSpaceWidth;
     int16_t pageWidth;
     int16_t pageHeight;

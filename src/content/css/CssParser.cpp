@@ -1,5 +1,6 @@
 #include "CssParser.h"
 
+#include <cmath>
 #include <ctype.h>
 
 static float parseSimpleFloat(const char* s, bool* ok) {
@@ -214,7 +215,18 @@ const CssStyle* CssParser::getStyleForClass(const String& className) const {
   return nullptr;
 }
 
-CssStyle CssParser::getCombinedStyle(const String& classNames) const {
+CssStyle CssParser::getTagStyle(const String& tagName) const {
+  CssStyle combined;
+  const CssStyle* style = getStyleForClass(tagName);
+
+  if (style) {
+    combined.merge(*style);
+  }
+
+  return combined;
+}
+
+CssStyle CssParser::getCombinedStyle(const String& tagName, const String& classNames) const {
   CssStyle combined;
 
   // Split class names by whitespace
@@ -239,9 +251,15 @@ CssStyle CssParser::getCombinedStyle(const String& classNames) const {
 
     if (end > start) {
       String className = classNames.substring(start, end);
-      const CssStyle* style = getStyleForClass(className);
-      if (style) {
-        combined.merge(*style);
+
+      const CssStyle* classOnly = getStyleForClass("." + className);
+      if (classOnly) {
+        combined.merge(*classOnly);
+      }
+
+      const CssStyle* tagAndClass = getStyleForClass(tagName + "." + className);
+      if (tagAndClass) {
+        combined.merge(*tagAndClass);
       }
     }
 
@@ -266,53 +284,49 @@ void CssParser::parseRule(const String& selector, const String& properties) {
     singleSelector.trim();
 
     if (singleSelector.length() > 0) {
-      // Extract class name from selector
-      String className = extractClassName(singleSelector);
+      // Parse properties
+      CssStyle style;
 
-      if (className.length() > 0) {
-        // Parse properties
-        CssStyle style;
+      // Split properties by semicolon
+      int propStart = 0;
+      int propLen = properties.length();
 
-        // Split properties by semicolon
-        int propStart = 0;
-        int propLen = properties.length();
+      while (propStart < propLen) {
+        int propEnd = properties.indexOf(';', propStart);
+        if (propEnd < 0)
+          propEnd = propLen;
 
-        while (propStart < propLen) {
-          int propEnd = properties.indexOf(';', propStart);
-          if (propEnd < 0)
-            propEnd = propLen;
+        String prop = properties.substring(propStart, propEnd);
+        prop.trim();
 
-          String prop = properties.substring(propStart, propEnd);
-          prop.trim();
+        if (prop.length() > 0) {
+          // Split property into name and value
+          int colonPos = prop.indexOf(':');
+          if (colonPos > 0) {
+            String propName = prop.substring(0, colonPos);
+            String propValue = prop.substring(colonPos + 1);
+            propName.trim();
+            propValue.trim();
 
-          if (prop.length() > 0) {
-            // Split property into name and value
-            int colonPos = prop.indexOf(':');
-            if (colonPos > 0) {
-              String propName = prop.substring(0, colonPos);
-              String propValue = prop.substring(colonPos + 1);
-              propName.trim();
-              propValue.trim();
+            // Convert to lowercase for comparison
+            propName.toLowerCase();
 
-              // Convert to lowercase for comparison
-              propName.toLowerCase();
-
-              parseProperty(propName, propValue, style);
-            }
+            parseProperty(propName, propValue, style);
           }
-
-          propStart = propEnd + 1;
         }
 
-        // Store style if it has any supported properties
-        if (style.hasTextAlign || style.hasFontStyle || style.hasFontWeight) {
-          // Merge with existing style if present
-          auto it = styleMap_.find(className);
-          if (it != styleMap_.end()) {
-            it->second.merge(style);
-          } else {
-            styleMap_[className] = style;
-          }
+        propStart = propEnd + 1;
+      }
+
+      // Store style if it has any supported properties
+      if (style.hasTextAlign || style.hasFontStyle || style.hasFontWeight || style.hasTextIndent ||
+          style.hasMarginTop || style.hasMarginBottom) {
+        // Merge with existing style if present
+        auto it = styleMap_.find(singleSelector);
+        if (it != styleMap_.end()) {
+          it->second.merge(style);
+        } else {
+          styleMap_[singleSelector] = style;
         }
       }
     }
@@ -332,35 +346,19 @@ void CssParser::parseProperty(const String& name, const String& value, CssStyle&
     style.fontWeight = parseFontWeight(value);
     style.hasFontWeight = true;
   } else if (name == "text-indent") {
-    // Parse text-indent values like '20px', '1.5em', or plain numbers.
-    String v = value;
-    v.trim();
-    v.toLowerCase();
-
-    // Default unit: pixels. For 'em' convert to px assuming 16px per em.
-    int16_t factor = 1;
-    if (v.length() >= 2 && v.substring(v.length() - 2) == String("em")) {
-      factor = 16;
-      v = v.substring(0, v.length() - 2);
-    } else if (v.length() >= 2 && v.substring(v.length() - 2) == String("px")) {
-      v = v.substring(0, v.length() - 2);
-    }
-
-    v.trim();
-    float indentVal = 0.0f;
-    if (v.length() > 0) {
-      bool parsed = false;
-      indentVal = parseSimpleFloat(v.c_str(), &parsed) * factor;
-      if (!parsed)
-        indentVal = 0.0f;
-    }
-    style.textIndent = indentVal;
-    style.hasTextIndent = (indentVal > 0);
+    style.textIndent = parseTextIndent(value);
+    style.hasTextIndent = true;
+  } else if (name == "margin-top") {
+    style.marginTop = parseMargin(value);
+    style.hasMarginTop = style.marginTop > 0;
+  } else if (name == "margin-bottom") {
+    style.marginBottom = parseMargin(value);
+    style.hasMarginBottom = style.marginBottom > 0;
   }
   // Add more property parsing here as needed
 }
 
-TextAlign CssParser::parseTextAlign(const String& value) {
+TextAlign CssParser::parseTextAlign(const String& value) const {
   String v = value;
   v.toLowerCase();
   v.trim();
@@ -379,7 +377,7 @@ TextAlign CssParser::parseTextAlign(const String& value) {
   return TextAlign::Left;
 }
 
-CssFontStyle CssParser::parseFontStyle(const String& value) {
+CssFontStyle CssParser::parseFontStyle(const String& value) const {
   String v = value;
   v.toLowerCase();
   v.trim();
@@ -392,7 +390,7 @@ CssFontStyle CssParser::parseFontStyle(const String& value) {
   return CssFontStyle::Normal;
 }
 
-CssFontWeight CssParser::parseFontWeight(const String& value) {
+CssFontWeight CssParser::parseFontWeight(const String& value) const {
   String v = value;
   v.toLowerCase();
   v.trim();
@@ -403,6 +401,62 @@ CssFontWeight CssParser::parseFontWeight(const String& value) {
 
   // Default to normal
   return CssFontWeight::Normal;
+}
+
+float CssParser::parseTextIndent(const String& value) const {
+  // Parse text-indent values like '20px', '1.5em', or plain numbers.
+  String v = value;
+  v.trim();
+  v.toLowerCase();
+
+  // Default unit: pixels. For 'em' convert to px assuming 16px per em.
+  float factor = 1.0f;
+  // endsWith / toFloat may not be available on all String implementations
+  if (v.length() >= 2 && v.substring(v.length() - 2) == String("em")) {
+    factor = 16.0f;
+    v = v.substring(0, v.length() - 2);
+  } else if (v.length() >= 2 && v.substring(v.length() - 2) == String("px")) {
+    v = v.substring(0, v.length() - 2);
+  } else if (v.length() >= 2 && v.substring(v.length() - 2) == String("pt")) {
+    // todo: tune this if necessary
+    v = v.substring(0, v.length() - 2);
+  }
+
+  v.trim();
+  // Attempt to parse float value using C's atof on the c_str
+  float indentVal = 0.0f;
+  if (v.length() > 0) {
+    indentVal = static_cast<float>(atof(v.c_str())) * factor;
+  }
+
+  return indentVal;
+}
+
+int CssParser::parseMargin(const String& value) const {
+  String v = value;
+  v.trim();
+  v.toLowerCase();
+
+  int newLines = 0;
+
+  if (v.length() >= 2 && v.substring(v.length() - 2) == String("em")) {
+    // 1em == 1 new line, flooring any fractions.
+    // todo: consider limiting number of new lines allowed, because the gaps can get a bit silly with some ePubs!
+    v = v.substring(0, v.length() - 2);
+    newLines = static_cast<int>(std::floor(atof(v.c_str())));
+  } else if (v.length() >= 1 && v.charAt(v.length() - 1) == '%') {
+    // Handle percentage: ~30 lines per page, so percentage/100 * 30 lines
+    v = v.substring(0, v.length() - 1);
+    float percentage = atof(v.c_str());
+    newLines = static_cast<int>(std::floor(percentage * 0.3f));
+  }
+
+  // Limit to maximum of 2 lines
+  if (newLines > 2) {
+    newLines = 2;
+  }
+
+  return newLines > 0 ? newLines : 0;
 }
 
 String CssParser::extractClassName(const String& selector) {
@@ -469,66 +523,17 @@ CssStyle CssParser::parseInlineStyle(const String& styleAttr) const {
         // Use the same parsing logic as parseProperty
         // Note: parseProperty is non-const, so we inline the logic here
         if (propName == "text-align") {
-          String v = propValue;
-          v.toLowerCase();
-          v.trim();
-
-          if (v == "left" || v == "start") {
-            style.textAlign = TextAlign::Left;
-          } else if (v == "right" || v == "end") {
-            style.textAlign = TextAlign::Right;
-          } else if (v == "center") {
-            style.textAlign = TextAlign::Center;
-          } else if (v == "justify") {
-            style.textAlign = TextAlign::Justify;
-          } else {
-            style.textAlign = TextAlign::Left;
-          }
+          style.textAlign = parseTextAlign(propValue);
           style.hasTextAlign = true;
         } else if (propName == "font-style") {
-          String v = propValue;
-          v.toLowerCase();
-          v.trim();
-
-          if (v == "italic" || v == "oblique") {
-            style.fontStyle = CssFontStyle::Italic;
-          } else {
-            style.fontStyle = CssFontStyle::Normal;
-          }
+          style.fontStyle = parseFontStyle(propValue);
           style.hasFontStyle = true;
         } else if (propName == "font-weight") {
-          String v = propValue;
-          v.toLowerCase();
-          v.trim();
-
-          if (v == "bold" || v == "bolder" || v == "700" || v == "800" || v == "900") {
-            style.fontWeight = CssFontWeight::Bold;
-          } else {
-            style.fontWeight = CssFontWeight::Normal;
-          }
+          style.fontWeight = parseFontWeight(propValue);
           style.hasFontWeight = true;
         } else if (propName == "text-indent") {
-          String v = propValue;
-          v.trim();
-          v.toLowerCase();
-
-          int16_t factor = 1;
-          if (v.length() >= 2 && v.substring(v.length() - 2) == String("em")) {
-            factor = 16;
-            v = v.substring(0, v.length() - 2);
-          } else if (v.length() >= 2 && v.substring(v.length() - 2) == String("px")) {
-            v = v.substring(0, v.length() - 2);
-          }
-          v.trim();
-          float indentVal = 0.0f;
-          if (v.length() > 0) {
-            bool parsed = false;
-            indentVal = parseSimpleFloat(v.c_str(), &parsed) * factor;
-            if (!parsed)
-              indentVal = 0.0f;
-          }
-          style.textIndent = indentVal;
-          style.hasTextIndent = (indentVal > 0);
+          style.textIndent = parseTextIndent(propValue);
+          style.hasTextIndent = true;
         }
       }
     }

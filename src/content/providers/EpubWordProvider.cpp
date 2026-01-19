@@ -253,28 +253,50 @@ bool EpubWordProvider::convertXhtmlToTxt(const String& srcPath, String& outTxtPa
   return true;
 }
 
-void EpubWordProvider::writeParagraphStyleToken(String& writeBuffer, const String& pendingParagraphClasses,
-                                                const String& pendingInlineStyle, bool& paragraphClassesWritten,
+void EpubWordProvider::writeParagraphStyleToken(String& writeBuffer, String& pendingTag,
+                                                const String& pendingParagraphClasses, const String& pendingInlineStyle,
+                                                bool& paragraphClassesWritten,
                                                 std::vector<char>& paragraphStyleEmitted) {
   // If this is the beginning of a paragraph and styles haven't been written yet,
   // write the style token in front of the text line.
-  // We check for either class-based styles or inline styles.
-  if ((!pendingParagraphClasses.isEmpty() || !pendingInlineStyle.isEmpty()) && !paragraphClassesWritten) {
+
+  if (!paragraphClassesWritten) {
     // Emit style properties for the paragraph using ESC + command byte format
     // Alignment: ESC+'L'(left), ESC+'R'(right), ESC+'C'(center), ESC+'J'(justify)
     // Style: ESC+'B'(bold), ESC+'I'(italic), ESC+'X'(bold+italic)
     const CssParser* css = epubReader_ ? epubReader_->getCssParser() : nullptr;
 
-    // Start with class-based styles
+    // Fetch CSS in order of precedence (tag < class < inline)
     CssStyle combined;
-    if (css && !pendingParagraphClasses.isEmpty()) {
-      combined = css->getCombinedStyle(pendingParagraphClasses);
+
+    // tag styles
+    if (css) {
+      CssStyle tagStyle = css->getTagStyle(pendingTag);
+      combined.merge(tagStyle);
     }
 
-    // Merge inline styles (inline styles take precedence over class styles)
+    // class styles
+    if (css && !pendingParagraphClasses.isEmpty()) {
+      CssStyle classStyle = css->getCombinedStyle(pendingTag, pendingParagraphClasses);
+      combined.merge(classStyle);
+    }
+
+    // inline styles
     if (css && !pendingInlineStyle.isEmpty()) {
       CssStyle inlineStyle = css->parseInlineStyle(pendingInlineStyle);
       combined.merge(inlineStyle);
+    }
+
+    if (combined.hasMarginTop) {
+      for (int i = 0; i < combined.marginTop; ++i) {
+        writeBuffer += "\n";
+      }
+    }
+
+    if (combined.hasMarginBottom) {
+      for (int i = 0; i < combined.marginBottom; ++i) {
+        paragraphStyleEmitted.push_back('\n');
+      }
     }
 
     // Only emit alignment tokens for paragraphs - NOT bold/italic
@@ -307,6 +329,14 @@ void EpubWordProvider::writeParagraphStyleToken(String& writeBuffer, const Strin
     if (styleToken.length() > 0) {
       writeBuffer += styleToken;
     }
+
+    // Automatically make headers bold to reflect typical user agent stylesheets
+    if (isHeaderElement(pendingTag)) {
+      writeBuffer += (char)0x1B;  // ESC
+      writeBuffer += 'B';
+      paragraphStyleEmitted.push_back('B');
+    }
+
     paragraphClassesWritten = true;
 
     // If the combined paragraph style specifies a positive text-indent value,
@@ -349,13 +379,17 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
 
   String buffer;                     // Output buffer
   std::vector<String> elementStack;  // Track nested elements
+  std::vector<bool> linkStack;       // Track if each element is a link with href
+  char lastCharWritten = '\0';       // Track last char written (persists across buffer flushes)
   // Track inline style element stack (store per-element flags in object state)
   std::vector<char> paragraphStyleEmitted;  // Track paragraph style tokens emitted (uppercase)
   String pendingParagraphClasses;           // CSS classes for current block
   String pendingInlineStyle;                // Inline style attribute for current block
+  String pendingTag;                        // Tag for current block
   bool paragraphClassesWritten = false;     // Have we written style token?
   bool lineHasContent = false;              // Does current line have visible content?
   bool lineHasNbsp = false;                 // Does current line have &nbsp;?
+  bool pendingLinkCloseSpace = false;       // Do we need to add space before next text?
 
   while (parser.read()) {
     SimpleXmlParser::NodeType nodeType = parser.getNodeType();
@@ -365,22 +399,43 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
       String name = parser.getName();
 
       // Track non-self-closing elements
+      bool isLinkWithHref = false;
       if (!parser.isEmptyElement()) {
         elementStack.push_back(name);
+        // Check if this is a link with href attribute
+        if (name == "a") {
+          String href = parser.getAttribute("href");
+          if (!href.isEmpty()) {
+            isLinkWithHref = true;
+            // Add space before link only if last written char is not whitespace
+            // Use lastCharWritten to handle case where buffer was flushed
+            if (lastCharWritten != '\0' && lastCharWritten != ' ' && lastCharWritten != '\n' &&
+                lastCharWritten != '\t') {
+              buffer += ' ';
+            }
+            buffer += (char)0x1B;  // ESC
+            buffer += 'O';         // Link open (italic style)
+            buffer += '(';
+          }
+        }
+        linkStack.push_back(isLinkWithHref);
       }
 
       // Block elements: add newline before if current line has content
       // This ensures blockquotes, nested divs, etc. start on a new line
       if (isBlockElement(name) && lineHasContent) {
         buffer += "\n";
+        lastCharWritten = '\n';
         lineHasContent = false;
         lineHasNbsp = false;
+        pendingLinkCloseSpace = false;  // Clear pending space at block boundaries
       }
 
       // Capture CSS classes and inline styles for block elements
       if (isBlockElement(name)) {
         pendingParagraphClasses = parser.getAttribute("class");
         pendingInlineStyle = parser.getAttribute("style");
+        pendingTag = name;
         paragraphClassesWritten = false;
       }
 
@@ -403,8 +458,8 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
               char endCmd = startCmd;
               if (startCmd >= 'A' && startCmd <= 'Z') {
                 endCmd = (char)tolower(startCmd);
+                buffer += (char)0x1B;
               }
-              buffer += (char)0x1B;
               buffer += endCmd;
             }
             paragraphStyleEmitted.clear();
@@ -415,6 +470,7 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
             writtenInlineCombined_ = '\0';
           }
           buffer += "\n";
+          lastCharWritten = '\n';
           lineHasContent = false;
           lineHasNbsp = false;
           // Keep paragraphClassesWritten as false so alignment reopens on next line
@@ -432,6 +488,15 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
         closeInlineStyleElement(buffer);
       }
 
+      // Handle end of link elements - add closing bracket and reset style
+      if (name == "a" && !linkStack.empty() && linkStack.back()) {
+        buffer += ')';
+        buffer += (char)0x1B;  // ESC
+        buffer += 'o';         // Link close (reset style)
+        // Set flag to potentially add space before next text content
+        pendingLinkCloseSpace = true;
+      }
+
       // Block elements: add newline if line had content OR had &nbsp;
       if (isBlockElement(name) || isHeaderElement(name)) {
         if (lineHasContent || lineHasNbsp) {
@@ -442,14 +507,15 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
               char endCmd = startCmd;
               if (startCmd >= 'A' && startCmd <= 'Z') {
                 endCmd = (char)tolower(startCmd);
+                buffer += (char)0x1B;
               }
-              buffer += (char)0x1B;
               buffer += endCmd;
             }
             paragraphStyleEmitted.clear();
           }
 
           buffer += "\n";
+          lastCharWritten = '\n';
         }
         // Close any open inline styles at paragraph end to prevent carry-over between paragraphs
         // Use the *written* inline combination so we close whatever was actually emitted
@@ -463,13 +529,18 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
         lineHasNbsp = false;
         pendingParagraphClasses = "";
         pendingInlineStyle = "";
+        pendingTag = "";
         paragraphClassesWritten = false;
         paragraphStyleEmitted.clear();
+        pendingLinkCloseSpace = false;  // Clear pending space at paragraph end
       }
 
-      // Pop from element stack
+      // Pop from element stack and link stack
       if (!elementStack.empty()) {
         elementStack.pop_back();
+      }
+      if (!linkStack.empty()) {
+        linkStack.pop_back();
       }
     }
 
@@ -484,6 +555,20 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
       String text = readAndDecodeText(parser);
       if (text.isEmpty()) {
         continue;
+      }
+
+      // Check if we need to add a space after a link close
+      if (pendingLinkCloseSpace) {
+        // Only add space if text doesn't start with whitespace
+        bool startsWithWhitespace = false;
+        if (text.length() > 0) {
+          char firstChar = text.charAt(0);
+          startsWithWhitespace = (firstChar == ' ' || firstChar == '\n' || firstChar == '\t' || firstChar == '\r');
+        }
+        if (!startsWithWhitespace) {
+          buffer += ' ';
+        }
+        pendingLinkCloseSpace = false;
       }
 
       if (text.indexOf("\xC2\xA0") >= 0) {
@@ -505,7 +590,7 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
       }
 
       // Write style token at start of paragraph and remember the emitted raw tokens
-      writeParagraphStyleToken(buffer, pendingParagraphClasses, pendingInlineStyle, paragraphClassesWritten,
+      writeParagraphStyleToken(buffer, pendingTag, pendingParagraphClasses, pendingInlineStyle, paragraphClassesWritten,
                                paragraphStyleEmitted);
 
       // Ensure inline style tokens (open/close) are emitted right before we write visible text
@@ -514,10 +599,18 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
       // Append text
       buffer += text;
       lineHasContent = true;
+      // Track last character for space logic across buffer flushes
+      if (text.length() > 0) {
+        lastCharWritten = text.charAt(text.length() - 1);
+      }
     }
 
     // Periodic flush to avoid excessive memory use and ensure data hits SD
     if (buffer.length() > FLUSH_THRESHOLD) {
+      // Remember last char before clearing buffer for space logic
+      if (buffer.length() > 0) {
+        lastCharWritten = buffer.charAt(buffer.length() - 1);
+      }
       size_t toWrite = buffer.length();
       size_t written = out.write((const uint8_t*)buffer.c_str(), toWrite);
       if (outBytes)
@@ -538,8 +631,8 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
       char endCmd = startCmd;
       if (startCmd >= 'A' && startCmd <= 'Z') {
         endCmd = (char)tolower(startCmd);
+        buffer += (char)0x1B;
       }
-      buffer += (char)0x1B;
       buffer += endCmd;
     }
     paragraphStyleEmitted.clear();
@@ -798,6 +891,7 @@ String EpubWordProvider::trimLeadingSpaces(const String& text) {
   }
   return text.substring(start);
 }
+
 char EpubWordProvider::writeInlineStyleToken(String& writeBuffer, const String& elementName, const String& classAttr,
                                              const String& styleAttr) {
   // Determine style flags for this element (from tag name, classes, inline styles)
@@ -816,7 +910,7 @@ char EpubWordProvider::writeInlineStyleToken(String& writeBuffer, const String& 
   if (css) {
     CssStyle combined;
     if (!classAttr.isEmpty()) {
-      combined = css->getCombinedStyle(classAttr);
+      combined = css->getCombinedStyle(elementName, classAttr);
     }
     if (!styleAttr.isEmpty()) {
       CssStyle inlineStyle = css->parseInlineStyle(styleAttr);
@@ -1242,29 +1336,40 @@ bool EpubWordProvider::hasPrevWord() {
 }
 
 StyledWord EpubWordProvider::getNextWord() {
-  if (!fileProvider_)
+  if (!fileProvider_) {
     return StyledWord();
+  }
   return fileProvider_->getNextWord();
 }
 
 StyledWord EpubWordProvider::getPrevWord() {
-  if (!fileProvider_)
+  if (!fileProvider_) {
     return StyledWord();
+  }
   return fileProvider_->getPrevWord();
 }
 
 uint32_t EpubWordProvider::getPercentage() {
   if (!fileProvider_)
     return 10000;
-  // For EPUBs, calculate book-wide percentage using chapter offset
+  // For EPUBs, map the TXT-based chapter progress to the XHTML-based chapter range
   if (isEpub_ && epubReader_) {
     size_t totalSize = epubReader_->getTotalBookSize();
-    if (totalSize > 0) {
-      size_t chapterOffset = epubReader_->getSpineItemOffset(currentChapter_);
-      size_t positionInChapter = static_cast<size_t>(fileProvider_->getCurrentIndex());
-      size_t absolutePosition = chapterOffset + positionInChapter;
-      return (uint32_t)((uint64_t)absolutePosition * 10000 / totalSize);
-    }
+    if (totalSize == 0)
+      return 10000;
+
+    // Get this chapter's start and end percentage based on XHTML sizes
+    size_t chapterOffset = epubReader_->getSpineItemOffset(currentChapter_);
+    size_t chapterXhtmlSize = epubReader_->getSpineItemSize(currentChapter_);
+    float chapterStartPct = static_cast<float>(chapterOffset) / static_cast<float>(totalSize);
+    float chapterEndPct = static_cast<float>(chapterOffset + chapterXhtmlSize) / static_cast<float>(totalSize);
+
+    // Get progress within current chapter from TXT file (0-10000 scale)
+    float chapterProgress = static_cast<float>(fileProvider_->getPercentage()) / 10000.0f;
+
+    // Map TXT progress to XHTML-based range, return as 0-10000 scale
+    float bookPct = chapterStartPct + chapterProgress * (chapterEndPct - chapterStartPct);
+    return static_cast<uint32_t>(bookPct * 10000.0f);
   }
   // Non-EPUB: delegate to file provider percentage
   return fileProvider_->getPercentage();
@@ -1277,9 +1382,19 @@ uint32_t EpubWordProvider::getPercentage(int index) {
     size_t totalSize = epubReader_->getTotalBookSize();
     if (totalSize == 0)
       return 10000;
+
+    // Get this chapter's start and end percentage based on XHTML sizes
     size_t chapterOffset = epubReader_->getSpineItemOffset(currentChapter_);
-    size_t absolutePosition = chapterOffset + static_cast<size_t>(index);
-    return (uint32_t)((uint64_t)absolutePosition * 10000 / totalSize);
+    size_t chapterXhtmlSize = epubReader_->getSpineItemSize(currentChapter_);
+    float chapterStartPct = static_cast<float>(chapterOffset) / static_cast<float>(totalSize);
+    float chapterEndPct = static_cast<float>(chapterOffset + chapterXhtmlSize) / static_cast<float>(totalSize);
+
+    // Get progress within current chapter from TXT file for the given index (0-10000 scale)
+    float chapterProgress = static_cast<float>(fileProvider_->getPercentage(index)) / 10000.0f;
+
+    // Map TXT progress to XHTML-based range, return as 0-10000 scale
+    float bookPct = chapterStartPct + chapterProgress * (chapterEndPct - chapterStartPct);
+    return static_cast<uint32_t>(bookPct * 10000.0f);
   }
   return fileProvider_->getPercentage(index);
 }

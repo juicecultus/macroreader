@@ -23,8 +23,18 @@ KnuthPlassLayoutStrategy::~KnuthPlassLayoutStrategy() {}
 
 LayoutStrategy::PageLayout KnuthPlassLayoutStrategy::layoutText(WordProvider& provider, TextRenderer& renderer,
                                                                 const LayoutConfig& config) {
+  Serial.println("[KP] layoutText start");
   const int16_t maxWidth = config.pageWidth - config.marginLeft - config.marginRight;
-  int16_t y = config.marginTop;
+
+  // Calculate vertical centering offset based on maximum line capacity
+  const int16_t availableHeight = config.pageHeight - config.marginTop - config.marginBottom;
+  const int16_t maxLines = availableHeight / config.lineHeight;
+  const int16_t totalContentHeight = maxLines * config.lineHeight - config.lineSpacing;
+  const int16_t verticalPadding = (availableHeight - totalContentHeight) / 2;
+
+  // Font height = lineHeight - lineSpacing
+  // Y coordinate is the baseline, so add font height to ensure top of first line is visible
+  int16_t y = config.marginTop + verticalPadding + (config.lineHeight - config.lineSpacing);
   const int16_t maxY = config.pageHeight - config.marginBottom;
 
   // Measure space width using renderer
@@ -34,6 +44,7 @@ LayoutStrategy::PageLayout KnuthPlassLayoutStrategy::layoutText(WordProvider& pr
   PageLayout result;
   std::vector<ParagraphLayoutInfo> paragraphs;
   std::vector<LayoutStrategy::Word> words;
+  words.reserve(512);  // Pre-allocate to avoid reallocation during paragraph collection
 
   int startIndex = provider.getCurrentIndex();
   while (y < maxY) {
@@ -58,6 +69,7 @@ LayoutStrategy::PageLayout KnuthPlassLayoutStrategy::layoutText(WordProvider& pr
       }
 
       // iterate line by line until paragraph end
+      size_t wordsBefore = words.size();
       for (size_t i = 0; i < lineResult.words.size(); i++) {
         words.push_back(lineResult.words[i]);
       }

@@ -277,9 +277,10 @@ TextViewerScreen::TextViewerScreen(EInkDisplay& display, TextRenderer& renderer,
   // Initialize layout config
   layoutConfig.marginLeft = 10;
   layoutConfig.marginRight = 10;
-  layoutConfig.marginTop = 44;
-  layoutConfig.marginBottom = 20;
+  layoutConfig.marginTop = 4;
+  layoutConfig.marginBottom = 24;
   layoutConfig.lineHeight = 30;
+  layoutConfig.lineSpacing = 4;
   layoutConfig.paragraphSpacing = 12;
   layoutConfig.minSpaceWidth = 8;
   layoutConfig.pageWidth = EInkDisplay::DISPLAY_WIDTH;
@@ -363,6 +364,7 @@ void TextViewerScreen::loadSettingsFromFile() {
   // Line height = font height + additional spacing from settings
   int lineSpacing = 4;  // Default spacing
   if (s.getInt(String("settings.lineHeight"), lineSpacing)) {
+    layoutConfig.lineSpacing = lineSpacing;
     layoutConfig.lineHeight = baseFontHeight + lineSpacing;
   }
 
