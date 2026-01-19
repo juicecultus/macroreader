@@ -563,8 +563,8 @@ void SettingsScreen::applyRefreshPasses() {
 
 String SettingsScreen::getCustomFontDisplayName() {
   Settings& s = uiManager.getSettings();
-  String fontPath;
-  if (s.getString(String("settings.customFont"), fontPath) && fontPath.length() > 0) {
+  String fontPath = s.getString(String("settings.customFont"));
+  if (fontPath.length() > 0) {
     // Extract just the filename from the path
     int lastSlash = fontPath.lastIndexOf('/');
     if (lastSlash >= 0) {

@@ -1126,9 +1126,11 @@ void TextViewerScreen::showErrorMessage(const char* msg) {
 
 void TextViewerScreen::loadCustomFont() {
   Settings& s = uiManager.getSettings();
-  String fontPath;
+  String fontPath = s.getString(String("settings.customFont"));
   
-  if (!s.getString(String("settings.customFont"), fontPath) || fontPath.length() == 0) {
+  Serial.printf("[%lu] TextViewerScreen::loadCustomFont: path='%s'\n", millis(), fontPath.c_str());
+  
+  if (fontPath.length() == 0) {
     // No custom font configured
     unloadCustomFont();
     return;

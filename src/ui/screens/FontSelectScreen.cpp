@@ -81,11 +81,13 @@ void FontSelectScreen::activate() {
   
   // Try to find current selection
   Settings& s = uiManager.getSettings();
-  String currentFont;
-  if (s.getString(String("settings.customFont"), currentFont) && currentFont.length() > 0) {
-    // Find this font in the list
+  String currentFont = s.getString(String("settings.customFont"));
+  if (currentFont.length() > 0) {
+    // Find this font in the list - currentFont is full path like "/fonts/Montserrat-Regular.ttf"
+    // fontFiles[] contains just filenames like "Montserrat-Regular.ttf"
     for (int i = 0; i < fontCount; i++) {
-      if (fontFiles[i] == currentFont) {
+      String fullPath = "/fonts/" + fontFiles[i];
+      if (fullPath == currentFont) {
         selectedIndex = i + 1;  // +1 because index 0 is "Built-in"
         break;
       }
