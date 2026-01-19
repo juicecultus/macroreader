@@ -1171,26 +1171,32 @@ void TextViewerScreen::unloadCustomFont() {
 }
 
 void TextViewerScreen::renderPageWithTtf(const LayoutStrategy::PageLayout& layout) {
-  if (!ttfRenderer) return;
+  if (!ttfRenderer) {
+    Serial.printf("[%lu] renderPageWithTtf: no ttfRenderer\n", millis());
+    return;
+  }
   
-  // Map bitmap font size to TTF character size
-  // The bitmap fonts are roughly: 26pt small, 28pt medium, 30pt large
-  // TTF sizes need adjustment based on visual matching
-  uint16_t ttfSize = 28;  // Default
+  // Map font size index to TTF character size
+  // settings.fontSize stores index: 0=Small, 1=Medium, 2=Large, 3=XL, 4=XXL
+  // Bitmap fonts are: 26pt, 28pt, 30pt, 32pt, 34pt
+  static const uint16_t ttfSizes[] = {26, 28, 30, 32, 34};
   
-  // Get current font size from settings to match
   Settings& s = uiManager.getSettings();
-  int fontSize = 28;
-  s.getInt(String("settings.fontSize"), fontSize);
-  ttfSize = (uint16_t)fontSize;
+  int fontSizeIndex = 1;  // Default to Medium
+  s.getInt(String("settings.fontSize"), fontSizeIndex);
+  if (fontSizeIndex < 0 || fontSizeIndex > 4) fontSizeIndex = 1;
+  uint16_t ttfSize = ttfSizes[fontSizeIndex];
   
   ttfRenderer->setCharacterSize(ttfSize);
   ttfRenderer->setTextColor(0);  // Black
   
+  int wordCount = 0;
   for (const auto& line : layout.lines) {
     for (const auto& word : line.words) {
       // Render each word at its computed position
       ttfRenderer->drawText(word.x, word.y, word.text.c_str());
+      wordCount++;
     }
   }
+  Serial.printf("[%lu] renderPageWithTtf: rendered %d words with TTF size %d\n", millis(), wordCount, ttfSize);
 }
